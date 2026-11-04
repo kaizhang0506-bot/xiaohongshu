@@ -1,0 +1,792 @@
+.tpl-checklist-body p {
+  font-size: 18px;
+  line-height: 1.6;
+  color: #2D2D2D;
+  margin: 6px 0;
+}
+.tpl-checklist-body h2 {
+  font-size: 22px;
+  font-weight: 700;
+  color: #1A1A1A;
+  margin: 12px 0 6px;
+}
+.tpl-checklist-body h3 {
+  font-size: 20px;
+  font-weight: 600;
+  color: #1A1A1A;
+  margin: 10px 0 4px;
+}
+.tpl-checklist-body strong {
+  font-weight: 700;
+  color: #1A1A1A;
+}
+.tpl-checklist-body ol,
+.tpl-checklist-body ul {
+  padding-left: 0;
+  margin: 4px 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.tpl-checklist-body li {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  background: rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-radius: 14px;
+  padding: 11px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
+  font-size: 18px;
+  line-height: 1.55;
+  color: #2D2D2D;
+  counter-increment: checklist-counter;
+}
+.tpl-checklist-body ol {
+  /* counter-reset 由父容器内联样式控制，支持跨页续编号 */
+}
+.tpl-checklist-body ol li::before {
+  content: counter(checklist-counter);
+  min-width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #FF2442, #FF6B81);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  flex-shrink: 0;
+  margin-top: 1px;
+  box-shadow: 0 2px 8px rgba(255, 36, 66, 0.3);
+}
+.tpl-checklist-body ol li:nth-child(even)::before {
+  background: linear-gradient(135deg, #8B5CF6, #A78BFA);
+  box-shadow: 0 2px 8px rgba(139, 92, 246, 0.3);
+}
+.tpl-checklist-body ul li::before {
+  content: "";
+  min-width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #FF2442, #FF6B81);
+  flex-shrink: 0;
+  margin-top: 8px;
+}
+.tpl-checklist-body ul li:nth-child(even)::before {
+  background: linear-gradient(135deg, #8B5CF6, #A78BFA);
+}
+.tpl-checklist-body hr {
+  border: none;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(139, 92, 246, 0.2), transparent);
+  margin: 12px 0;
+}
+
+/* ===== 卡片内富文本渲染 — 笔记模板 ===== */
+.tpl-essay-body p {
+  font-size: 18px;
+  line-height: 1.8;
+  color: #4A3F35;
+  margin: 0 0 16px;
+  text-indent: 2em;
+}
+.tpl-essay-body p:last-child {
+  margin-bottom: 0;
+}
+.tpl-essay-body h2 {
+  font-size: 22px;
+  font-weight: 700;
+  color: #2C2417;
+  margin: 16px 0 8px;
+  text-indent: 0;
+}
+.tpl-essay-body h3 {
+  font-size: 20px;
+  font-weight: 600;
+  color: #2C2417;
+  margin: 12px 0 6px;
+  text-indent: 0;
+}
+.tpl-essay-body strong {
+  font-weight: 600;
+  color: #2C2417;
+}
+.tpl-essay-body em {
+  font-style: italic;
+}
+.tpl-essay-body ol,
+.tpl-essay-body ul {
+  padding-left: 1.8em;
+  margin: 8px 0;
+  text-indent: 0;
+}
+.tpl-essay-body li {
+  font-size: 18px;
+  line-height: 1.8;
+  color: #4A3F35;
+  margin: 4px 0;
+}
+.tpl-essay-body hr {
+  border: none;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(200, 149, 108, 0.3), transparent);
+  margin: 16px 0;
+}
+
+/* ===== 卡片内富文本渲染 — 科技模板 ===== */
+.tpl-tech-body p {
+  font-size: 17px;
+  line-height: 1.65;
+  color: rgba(200, 210, 230, 0.85);
+  margin: 6px 0;
+}
+.tpl-tech-body h2 {
+  font-size: 22px;
+  font-weight: 700;
+  color: #E8EEFF;
+  margin: 12px 0 6px;
+}
+.tpl-tech-body h3 {
+  font-size: 20px;
+  font-weight: 600;
+  color: #D0DAEF;
+  margin: 10px 0 4px;
+}
+.tpl-tech-body strong {
+  font-weight: 700;
+  color: #00D4FF;
+}
+.tpl-tech-body ol,
+.tpl-tech-body ul {
+  padding-left: 0;
+  margin: 4px 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.tpl-tech-body li {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 8px;
+  padding: 10px 14px;
+  border: 1px solid rgba(0, 212, 255, 0.1);
+  font-size: 17px;
+  line-height: 1.55;
+  color: rgba(200, 210, 230, 0.85);
+  counter-increment: tech-counter;
+  transition: border-color 0.2s;
+}
+.tpl-tech-body ol {
+  /* counter-reset 由父容器内联样式控制 */
+}
+.tpl-tech-body ol li::before {
+  content: counter(tech-counter, decimal-leading-zero);
+  min-width: 30px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #00D4FF;
+  font-size: 13px;
+  font-weight: 700;
+  flex-shrink: 0;
+  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  text-shadow: 0 0 8px rgba(0, 212, 255, 0.4);
+  border-right: 1px solid rgba(0, 212, 255, 0.2);
+  padding-right: 12px;
+  margin-right: 0;
+}
+.tpl-tech-body ol li:nth-child(3n+2)::before {
+  color: #6366F1;
+  text-shadow: 0 0 8px rgba(99, 102, 241, 0.4);
+  border-right-color: rgba(99, 102, 241, 0.2);
+}
+.tpl-tech-body ol li:nth-child(3n)::before {
+  color: #EC4899;
+  text-shadow: 0 0 8px rgba(236, 72, 153, 0.4);
+  border-right-color: rgba(236, 72, 153, 0.2);
+}
+.tpl-tech-body ul li::before {
+  content: "▹";
+  color: #00D4FF;
+  font-size: 14px;
+  flex-shrink: 0;
+  margin-top: 1px;
+  text-shadow: 0 0 6px rgba(0, 212, 255, 0.4);
+}
+.tpl-tech-body ul li:nth-child(even)::before {
+  color: #6366F1;
+  text-shadow: 0 0 6px rgba(99, 102, 241, 0.4);
+}
+.tpl-tech-body hr {
+  border: none;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(0, 212, 255, 0.3), rgba(99, 102, 241, 0.15), transparent);
+  margin: 12px 0;
+}
+.tpl-tech-body em {
+  font-style: normal;
+  color: #6366F1;
+}
+
+/* ===== 卡片内富文本渲染 — 艺术模板 ===== */
+.tpl-art-body p {
+  font-size: 17px;
+  line-height: 1.85;
+  color: #4A3E33;
+  margin: 0 0 14px;
+  text-indent: 2em;
+}
+.tpl-art-body p:last-child {
+  margin-bottom: 0;
+}
+.tpl-art-body h2 {
+  font-size: 21px;
+  font-weight: 700;
+  color: #3D3229;
+  margin: 14px 0 8px;
+  text-indent: 0;
+  letter-spacing: 1px;
+}
+.tpl-art-body h3 {
+  font-size: 19px;
+  font-weight: 600;
+  color: #3D3229;
+  margin: 12px 0 6px;
+  text-indent: 0;
+}
+.tpl-art-body strong {
+  font-weight: 600;
+  color: #3D3229;
+}
+.tpl-art-body em {
+  font-style: italic;
+  color: #8B7355;
+}
+.tpl-art-body ol,
+.tpl-art-body ul {
+  padding-left: 1.8em;
+  margin: 8px 0;
+  text-indent: 0;
+}
+.tpl-art-body li {
+  font-size: 17px;
+  line-height: 1.85;
+  color: #4A3E33;
+  margin: 4px 0;
+}
+.tpl-art-body hr {
+  border: none;
+  height: 0.5px;
+  background: linear-gradient(90deg, transparent 5%, rgba(196, 168, 130, 0.3) 30%, rgba(196, 168, 130, 0.3) 70%, transparent 95%);
+  margin: 14px 0;
+}
+
+/* ===== 卡片内富文本渲染 — Kindle 模板 ===== */
+.tpl-kindle-body p {
+  font-size: 16px;
+  line-height: 1.9;
+  color: #2A2A2A;
+  margin: 0 0 14px;
+  text-indent: 2em;
+}
+.tpl-kindle-body p:last-child {
+  margin-bottom: 0;
+}
+.tpl-kindle-body h2 {
+  font-size: 20px;
+  font-weight: 700;
+  color: #1A1A1A;
+  margin: 16px 0 8px;
+  text-indent: 0;
+}
+.tpl-kindle-body h3 {
+  font-size: 18px;
+  font-weight: 600;
+  color: #1A1A1A;
+  margin: 12px 0 6px;
+  text-indent: 0;
+}
+.tpl-kindle-body strong {
+  font-weight: 700;
+  color: #1A1A1A;
+}
+.tpl-kindle-body em {
+  font-style: italic;
+}
+.tpl-kindle-body ol,
+.tpl-kindle-body ul {
+  padding-left: 2em;
+  margin: 8px 0;
+  text-indent: 0;
+}
+.tpl-kindle-body ol {
+  list-style-type: decimal;
+}
+.tpl-kindle-body ul {
+  list-style-type: disc;
+}
+.tpl-kindle-body li {
+  font-size: 16px;
+  line-height: 1.9;
+  color: #2A2A2A;
+  margin: 3px 0;
+}
+.tpl-kindle-body hr {
+  border: none;
+  height: 1px;
+  background: rgba(0, 0, 0, 0.08);
+  margin: 16px 0;
+}
+.tpl-kindle-body blockquote {
+  border-left: 2px solid rgba(0, 0, 0, 0.15);
+  padding-left: 14px;
+  margin: 12px 0;
+  color: #555;
+  font-style: italic;
+}
+
+/* ===== 卡片内富文本渲染 — iPhone 17 模板 ===== */
+.tpl-iphone17-body p {
+  font-size: 15px;
+  line-height: 1.75;
+  color: #1C1C1E;
+  margin: 0 0 12px;
+}
+.tpl-iphone17-body p:last-child {
+  margin-bottom: 0;
+}
+.tpl-iphone17-body h2 {
+  font-size: 18px;
+  font-weight: 700;
+  color: #1C1C1E;
+  margin: 14px 0 6px;
+  letter-spacing: -0.3px;
+}
+.tpl-iphone17-body h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: #1C1C1E;
+  margin: 10px 0 4px;
+}
+.tpl-iphone17-body strong {
+  font-weight: 700;
+  color: #1C1C1E;
+}
+.tpl-iphone17-body em {
+  font-style: italic;
+  color: #3A3A3C;
+}
+.tpl-iphone17-body ol,
+.tpl-iphone17-body ul {
+  padding-left: 1.5em;
+  margin: 6px 0;
+}
+.tpl-iphone17-body li {
+  font-size: 15px;
+  line-height: 1.75;
+  color: #1C1C1E;
+  margin: 3px 0;
+}
+.tpl-iphone17-body hr {
+  border: none;
+  height: 0.5px;
+  background: rgba(0, 0, 0, 0.08);
+  margin: 12px 0;
+}
+
+/* ===== 卡片内富文本渲染 — MacBook 模板 ===== */
+.tpl-macbook-body p {
+  font-size: 13px;
+  line-height: 1.7;
+  color: #1D1D1F;
+  margin: 0 0 8px;
+}
+.tpl-macbook-body p:last-child {
+  margin-bottom: 0;
+}
+.tpl-macbook-body h2 {
+  font-size: 15px;
+  font-weight: 700;
+  color: #1D1D1F;
+  margin: 10px 0 4px;
+  letter-spacing: -0.2px;
+}
+.tpl-macbook-body h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1D1D1F;
+  margin: 8px 0 3px;
+}
+.tpl-macbook-body strong {
+  font-weight: 700;
+  color: #1D1D1F;
+}
+.tpl-macbook-body em {
+  font-style: italic;
+  color: #3A3A3C;
+}
+.tpl-macbook-body ol,
+.tpl-macbook-body ul {
+  padding-left: 0;
+  margin: 4px 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.tpl-macbook-body li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: #1D1D1F;
+  background: rgba(0,0,0,0.025);
+  border-radius: 5px;
+  padding: 5px 10px;
+  border: 1px solid rgba(0,0,0,0.05);
+  counter-increment: macbook-counter;
+}
+.tpl-macbook-body ol {
+  counter-reset: macbook-counter;
+}
+.tpl-macbook-body ol li::before {
+  content: counter(macbook-counter);
+  min-width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #007AFF;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.tpl-macbook-body ul li::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #007AFF;
+  flex-shrink: 0;
+  margin-top: 6px;
+}
+.tpl-macbook-body hr {
+  border: none;
+  height: 0.5px;
+  background: rgba(0, 0, 0, 0.07);
+  margin: 10px 0;
+}
+
+/* ===== 卡片内富文本渲染 — FC 8bit 模板 ===== */
+.tpl-fc8bit-body {
+  font-family: "Courier New", "Lucida Console", "Consolas", monospace;
+}
+.tpl-fc8bit-body p {
+  font-size: 15px;
+  line-height: 1.7;
+  color: #ABABAB;
+  margin: 6px 0;
+}
+.tpl-fc8bit-body h2 {
+  font-size: 17px;
+  font-weight: 700;
+  color: #F8C800;
+  margin: 10px 0 5px;
+  letter-spacing: 1px;
+}
+.tpl-fc8bit-body h3 {
+  font-size: 15px;
+  font-weight: 700;
+  color: #4CAF50;
+  margin: 8px 0 4px;
+  letter-spacing: 1px;
+}
+.tpl-fc8bit-body strong {
+  font-weight: 700;
+  color: #F8C800;
+}
+.tpl-fc8bit-body em {
+  font-style: normal;
+  color: #3CBCFC;
+}
+.tpl-fc8bit-body ol,
+.tpl-fc8bit-body ul {
+  padding-left: 0;
+  margin: 4px 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  counter-reset: inherit;
+}
+.tpl-fc8bit-body li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 7px 10px;
+  background: #1C1C1C;
+  border-left: 3px solid #3C3C3C;
+  font-size: 15px;
+  line-height: 1.55;
+  color: #C8C8C8;
+  counter-increment: fc8bit-counter;
+}
+.tpl-fc8bit-body ol li::before {
+  content: counter(fc8bit-counter, decimal-leading-zero);
+  color: #F8C800;
+  font-size: 12px;
+  font-weight: 700;
+  min-width: 24px;
+  flex-shrink: 0;
+  font-family: "Courier New", "Lucida Console", monospace;
+  padding-top: 1px;
+}
+.tpl-fc8bit-body ul li::before {
+  content: "▶";
+  color: #4CAF50;
+  font-size: 10px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.tpl-fc8bit-body li:nth-child(3n+2) {
+  border-left-color: #4CAF50;
+}
+.tpl-fc8bit-body li:nth-child(3n) {
+  border-left-color: #3CBCFC;
+}
+.tpl-fc8bit-body hr {
+  border: none;
+  height: 2px;
+  background: repeating-linear-gradient(90deg, #3C3C3C 0px, #3C3C3C 6px, transparent 6px, transparent 9px);
+  margin: 10px 0;
+}
+
+/* ===== 卡片内富文本渲染 — Journal 日记便签模板 ===== */
+.tpl-journal-body p {
+  font-size: 18px;
+  line-height: 1.85;
+  color: #2D5A35;
+  margin: 0 0 14px;
+  font-family: "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", sans-serif;
+}
+.tpl-journal-body p:last-child {
+  margin-bottom: 0;
+}
+.tpl-journal-body h2 {
+  font-size: 22px;
+  font-weight: 700;
+  color: "#1E3D24";
+  margin: 16px 0 8px;
+  font-family: "PingFang SC", "Hiragino Sans GB", sans-serif;
+}
+.tpl-journal-body h3 {
+  font-size: 19px;
+  font-weight: 600;
+  color: #2D5A35;
+  margin: 12px 0 6px;
+}
+.tpl-journal-body strong {
+  font-weight: 700;
+  color: #1E3D24;
+}
+.tpl-journal-body em {
+  font-style: italic;
+  color: #3A6E42;
+}
+.tpl-journal-body ol,
+.tpl-journal-body ul {
+  padding-left: 0;
+  margin: 6px 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.tpl-journal-body li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 17px;
+  line-height: 1.75;
+  color: #2D5A35;
+  font-family: "PingFang SC", "Hiragino Sans GB", sans-serif;
+  counter-increment: journal-counter;
+}
+.tpl-journal-body ol li::before {
+  content: counter(journal-counter) ".";
+  font-size: 15px;
+  font-weight: 700;
+  color: #4A7A50;
+  min-width: 20px;
+  flex-shrink: 0;
+  font-family: "Courier New", monospace;
+  padding-top: 2px;
+}
+.tpl-journal-body ul li::before {
+  content: "—";
+  color: #4A7A50;
+  font-size: 15px;
+  flex-shrink: 0;
+  margin-top: 2px;
+  font-family: "Courier New", monospace;
+}
+.tpl-journal-body hr {
+  border: none;
+  height: 1px;
+  background: rgba(45, 90, 53, 0.2);
+  margin: 14px 0;
+}
+
+/* ===== 卡片内富文本渲染 — Article 公众号长文模板 ===== */
+.tpl-article-body p {
+  font-size: 16px;
+  line-height: 1.90;
+  color: #333330;
+  margin: 0 0 14px;
+  font-family: "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", sans-serif;
+}
+.tpl-article-body p:last-child {
+  margin-bottom: 0;
+}
+.tpl-article-body h2 {
+  font-size: 20px;
+  font-weight: 800;
+  color: #141414;
+  margin: 18px 0 8px;
+  letter-spacing: -0.2px;
+  font-family: "PingFang SC", "Hiragino Sans GB", sans-serif;
+}
+.tpl-article-body h3 {
+  font-size: 17px;
+  font-weight: 700;
+  color: #222220;
+  margin: 14px 0 6px;
+}
+.tpl-article-body strong {
+  font-weight: 700;
+  color: #141414;
+}
+.tpl-article-body em {
+  font-style: italic;
+  color: #555550;
+}
+.tpl-article-body ol,
+.tpl-article-body ul {
+  padding-left: 0;
+  margin: 6px 0 14px;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.tpl-article-body li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 16px;
+  line-height: 1.80;
+  color: #333330;
+  counter-increment: article-counter;
+}
+.tpl-article-body ol li::before {
+  content: counter(article-counter) ".";
+  font-size: 14px;
+  font-weight: 700;
+  color: #888884;
+  min-width: 20px;
+  flex-shrink: 0;
+  padding-top: 2px;
+  font-family: "PingFang SC", sans-serif;
+}
+.tpl-article-body ul li::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #888884;
+  flex-shrink: 0;
+  margin-top: 10px;
+}
+.tpl-article-body hr {
+  border: none;
+  height: 1px;
+  background: rgba(0, 0, 0, 0.08);
+  margin: 16px 0;
+}
+
+/* ── TextNote 便签模板 ── */
+.tpl-textnote-body p {
+  font-size: 15px;
+  line-height: 1.75;
+  color: #333333;
+  margin: 0 0 12px;
+  font-family: "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", sans-serif;
+}
+.tpl-textnote-body p:last-child {
+  margin-bottom: 0;
+}
+.tpl-textnote-body strong, .tpl-textnote-body b {
+  font-weight: 700;
+  color: #111111;
+}
+.tpl-textnote-body ul {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 12px;
+}
+.tpl-textnote-body ul li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 15px;
+  line-height: 1.75;
+  color: #333333;
+  margin-bottom: 6px;
+}
+.tpl-textnote-body ul li::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #3FC45A;
+  flex-shrink: 0;
+  margin-top: 9px;
+}
+.tpl-textnote-body hr {
+  border: none;
+  height: 1px;
+  background: rgba(63, 196, 90, 0.2);
+  margin: 14px 0;
+}
+
+/* Text is typeset at the template's native size before 1080px export. */
+.native-template h1 { font-size: 38px !important; line-height: 1.25 !important; margin: 0 0 16px !important; overflow-wrap: anywhere; }
+.native-template.native-cover h1 { font-size: 52px !important; }
+.native-template [class$="-body"] p { font-size: 21px; line-height: 1.6; }
+.native-checklist h1 { font-family: "Microsoft YaHei",sans-serif !important; font-weight: 900 !important; text-align: left; letter-spacing: -1px !important; }
+.native-essay h1 { font-family: "KaiTi","STKaiti",serif !important; font-weight: 400 !important; text-align: center; letter-spacing: 3px !important; }
+.native-essay [class$="-body"] { font-family: "KaiTi","STKaiti",serif; }
+.native-tech h1 { font-family: "Consolas","Microsoft YaHei",monospace !important; font-weight: 900 !important; letter-spacing: 1px !important; }
+.native-art h1 { font-family: "SimSun",serif !important; font-style: italic; text-align: right; font-weight: 600 !important; }
+.native-kindle h1 { font-family: "SimSun",serif !important; font-weight: 700 !important; }
+.native-journal h1 { font-family: "KaiTi",serif !important; font-weight: 400 !important; text-align: left; }
+.native-textnote h1 { font-family: "Microsoft YaHei",sans-serif !important; font-weight: 900 !important; text-align: center; text-decoration: underline; text-underline-offset: 8px; }
+
+.native-macbook .macbook-expanded h1 { font-size: 38px !important; }
+.native-macbook.native-cover .macbook-expanded h1 { font-size: 46px !important; }
+.native-macbook .macbook-expanded.with-image h1 { font-size: 28px !important; }
+.native-macbook .tpl-macbook-body img { height: 210px !important; max-width: 100%; object-fit: contain !important; background: transparent !important; }
+.native-macbook .tpl-macbook-body p { font-size: 20px; line-height: 1.45; margin: 6px 0; color: #243321; }
