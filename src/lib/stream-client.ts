@@ -49,6 +49,9 @@ export async function readSseStream(
         if (payload.type === 'delta' && typeof payload.text === 'string') {
           fullText += payload.text;
           onDelta(fullText);
+        } else if (payload.type === 'reset') {
+          fullText = '';
+          onDelta(fullText);
         } else if (payload.type === 'error') {
           throw new Error(payload.message || 'AI 生成失败');
         }

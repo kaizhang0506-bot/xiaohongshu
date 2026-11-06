@@ -1,4 +1,6 @@
 import { templates as rednoteTemplates } from '@/components/rednote-templates/registry';
+import { STUDIO_LAYOUTS } from './studio-layouts';
+import { NATIVE_TEMPLATES } from './xhs-native-layouts';
 /**
  * 卡片排版模板清单（唯一来源，共 100 套）。
  * 前 16 套为手工调校的独立渲染分支（family 与 id 同名）；
@@ -281,7 +283,23 @@ const rednoteLayouts: CardLayoutSpec[] = rednoteTemplates.map((template, index) 
   family: 'frame', bg: ['#EEEAFE', '#F6EEE3', '#101B33', '#F5EAE6', '#E7E4DA', '#E4E9F0', '#E7E9ED', '#25203D', '#E8EDE6', '#F6F3EC', '#F8F3DB'][index],
   fg: index === 2 || index === 7 ? '#FFFFFF' : '#222222', fgSoft: '#666666', accent: ['#8B5CF6', '#AE7050', '#00A7D0', '#B65C70', '#333333', '#3878C2', '#444444', '#F9CA40', '#4A7A50', '#9A5744', '#D9A82E'][index], accentSoft: '#EEEEEE', noteColor: '#777777', titleFont: 'sans', decor: 'frame', radius: 0,
 }));
-export const CARD_LAYOUTS: CardLayoutSpec[] = [...rednoteLayouts, ...md2cardThemes, ...handcrafted, ...generated];
+const paperNotebook: CardLayoutSpec = {
+  id: 'xhs-paper-notebook', label: '小红书奶油手写笔记', desc: '本地纸纹 · 墨绿大字 · 黄色重点 · 编号手账框',
+  family: 'journal', bg: '#f7efdb', fg: '#073d1d', fgSoft: '#416345', accent: '#f2c84b',
+  accentSoft: '#fff8e4', noteColor: '#416345', titleFont: 'sans', decor: 'frame', radius: 22, titleWeight: 950,
+};
+
+/** New ready-to-use designs are local; legacy IDs stay registered for saved projects. */
+export const NATIVE_CARD_LAYOUTS: CardLayoutSpec[] = NATIVE_TEMPLATES.map(template => ({
+  id: template.id, label: template.name, desc: template.description,
+  family: 'journal', bg: template.family.bg, fg: template.family.ink,
+  fgSoft: template.family.ink, accent: template.family.accent,
+  accentSoft: template.family.secondary, noteColor: template.family.ink,
+  titleFont: template.family.titleFont === 'serif' ? 'serif' : template.family.titleFont === 'rounded' ? 'round' : 'sans',
+  decor: 'none', radius: 20, titleWeight: template.titleWeight,
+}));
+
+export const CARD_LAYOUTS: CardLayoutSpec[] = [...NATIVE_CARD_LAYOUTS, paperNotebook, ...['newspaper','blueprint','scrapbook','magazine'].map((id,i)=>({...paperNotebook,id:'xhs-five-'+id,label:['复古财经报刊','蓝色研究笔记','粉色剪贴','橙黑杂志'][i]})), ...STUDIO_LAYOUTS, ...rednoteLayouts, ...md2cardThemes, ...handcrafted, ...generated];
 
 const byId = new Map(CARD_LAYOUTS.map((spec: CardLayoutSpec) => [spec.id, spec]));
 

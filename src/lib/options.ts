@@ -165,6 +165,10 @@ export const STRUCTURE_OPTIONS: OptionDef<StructureId>[] = [
 /** 输出长度（3 档） */
 export const LENGTH_OPTIONS: OptionDef<LengthId>[] = [
   {
+    id: 'concise', label: '原意精简', desc: '意思不变，写短写清楚，不凑字数',
+    prompt: '原意精简：逐段提取全部关键信息，再用更简洁的新表达重写。保留原文的观点、因果、对比、否定、例外、关键数字和适用条件，可以合并重复句和删除口头铺垫，不要求与原文字数相同，不为了凑篇幅扩写。原则上比原文短，以讲全原意为准；不能把多个不同要点压成一句空话，也不能只改标题却沿用正文。',
+  },
+  {
     id: 'short',
     label: '短文案',
     desc: '约 120-200 字',

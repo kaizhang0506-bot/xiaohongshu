@@ -1,17 +1,24 @@
 'use client';
 
+import { CardRichText } from './CardRichText';
+import { cardTextToHtml } from '@/lib/card-rich-text';
+
 import { getTemplateById } from '@/components/rednote-templates/registry';
 
 import { useCardTextFit } from './useCardTextFit';
+import { FiveStyleCard } from './FiveStyleCard';
+import { StudioCard } from './StudioCard';
+import { PaperNotebookCard } from './PaperNotebookCard';
+import { XhsNativeCard } from './XhsNativeCard';
+import { CoverImage, TitleImageCover } from './TitleImageCover';
 import type { CardContent, CardLayoutId } from '@/lib/types';
 import { CARD_LAYOUTS, getCardLayout, type LayoutDecor } from '@/lib/layouts';
+import { CARD_FONTS } from '@/lib/card-typography';
 
-const SANS =
-  "'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', sans-serif";
-const SERIF =
-  "'Noto Serif SC', 'Songti SC', 'STSong', 'SimSun', Georgia, serif";
+const SANS = CARD_FONTS.sans;
+const SERIF = CARD_FONTS.serif;
 const MONO =
-  "'JetBrains Mono', 'SF Mono', 'Menlo', 'Consolas', 'Courier New', monospace";
+  `'JetBrains Mono', 'SF Mono', 'Menlo', 'Consolas', 'Courier New', ${CARD_FONTS.sans}`;
 
 interface CardTheme {
   bg: string;
@@ -124,6 +131,20 @@ function pageLabel(content: CardContent): string {
   ).padStart(2, '0')}`;
 }
 
+/** 内容页收尾 tags 行：仅最后一张内容页（生成端附带 tags）渲染 */
+function EndTagRow({ tags, theme }: { tags?: string[]; theme: CardTheme }) {
+  if (!tags || tags.length === 0) return null;
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px 26px', marginTop: 44, alignItems: 'center' }}>
+      {tags.map((tag, i) => (
+        <span key={`${tag}-${i}`} style={{ fontSize: 24, fontWeight: 700, color: theme.fgSoft, letterSpacing: 1 }}>
+          {`#${tag}`}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 export interface CardItemProps {
   content: CardContent;
   layout: CardLayoutId;
@@ -138,7 +159,7 @@ export interface CardItemProps {
 }
 
 export function CardItem({ content, layout, brandName, image, referenceVisual, editedPage, fontScale = 1 }: CardItemProps) {
-  const fitRef = useCardTextFit(JSON.stringify([content, layout, image, referenceVisual, editedPage, fontScale]), layout.startsWith('rednote-') ? fontScale : 1);
+  const fitRef = useCardTextFit(JSON.stringify([content, layout, image, referenceVisual, editedPage, fontScale]), layout.startsWith('rednote-') ? fontScale : 1, content.kind);
   const spec = getCardLayout(layout);
   const theme = { ...themeOf(layout), fontScale };
   const family: CardLayoutId = spec.family;
@@ -164,16 +185,23 @@ export function CardItem({ content, layout, brandName, image, referenceVisual, e
     color: theme.fg,
     flexShrink: 0,
   };
+  if (layout.startsWith('xhs-native-')) return <div ref={fitRef} style={{width:1080,height:1440}}><XhsNativeCard id={layout} content={content} image={effectiveImage} fontScale={fontScale}/></div>;
+  if (content.kind === 'cover' && !spec.customTemplate) return <div ref={fitRef} style={{ width: 1080, height: 1440 }}>
+    <TitleImageCover title={content.title || '把重点记下来'} image={effectiveImage} background={theme.bg} ink={theme.fg} accent={theme.accent} secondary={theme.accentSoft} paper={theme.bg} fontFamily={theme.titleFamily ?? theme.sans} fontWeight={theme.titleWeight} fontScale={fontScale} align={theme.align} backgroundStyle={{ backgroundImage: root.backgroundImage, backgroundSize: root.backgroundSize }} />
+  </div>;
+  if (layout.startsWith('xhs-five-')) return <div ref={fitRef} style={{width:1080,height:1440}}><FiveStyleCard content={content} image={effectiveImage} layout={layout} fontScale={fontScale}/></div>;
+  if (layout === 'xhs-paper-notebook') return <div ref={fitRef} style={{width:1080,height:1440}}><PaperNotebookCard content={content} image={effectiveImage} fontScale={fontScale}/></div>;
+  if (layout.startsWith('studio-')) return <div ref={fitRef} style={{width:1080,height:1440}}><StudioCard id={layout} content={content} image={effectiveImage} fontScale={fontScale}/></div>;
 
   if (spec.customTemplate) {
     const custom = spec.customTemplate;
     const title = content.kind === 'cover' ? content.title : content.kind === 'section' ? content.heading : '记住这几点';
-    const text = content.kind === 'cover' ? content.subtitle : content.kind === 'section' ? content.paragraph : (content.tags ?? []).join(' · ');
+    const text = content.kind === 'cover' ? '' : content.kind === 'section' ? content.paragraph : (content.tags ?? []).join(' · ');
     return <div ref={fitRef} style={{ ...root, backgroundColor: 'transparent', backgroundImage: `url("${custom.image}")`, backgroundSize: 'contain', backgroundPosition: 'center', backgroundRepeat: 'no-repeat', color: custom.color, fontFamily: custom.font === 'serif' ? SERIF : custom.font === 'mono' ? MONO : SANS }}>
-      <div style={{ position: 'absolute', left: `${custom.x}%`, top: `${custom.y}%`, width: `${custom.width}%`, height: `${custom.height}%`, overflow: 'hidden', display: 'flex', flexDirection: 'column', gap: 28, textAlign: custom.align }}>
-        <h1 style={{ fontSize: (content.kind === 'cover' ? 100 : 64) * fontScale, fontWeight: 900, lineHeight: 1.3, margin: 0, overflowWrap: 'anywhere' }}>{title}</h1>
-        {effectiveImage && <img src={effectiveImage} alt="原图素材" style={{ width: '100%', height: '38%', objectFit: 'contain', flexShrink: 0 }} />}
-        {text && <p style={{ fontSize: 44 * fontScale, lineHeight: 1.5, margin: 0, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{text}</p>}
+      <div style={{ position: 'absolute', left: `${custom.x}%`, top: `${custom.y}%`, width: `${custom.width}%`, height: `${custom.height}%`, overflow: 'hidden', display: content.kind === 'cover' ? 'grid' : 'flex', gridTemplateRows: effectiveImage ? 'minmax(0, 1fr) minmax(0, 1fr)' : 'minmax(0, 1fr)', flexDirection: 'column', gap: 28, textAlign: custom.align }}>
+        {title && (content.kind === 'cover' ? <div style={{ minHeight: 0, overflow: 'hidden', display: 'flex', alignItems: 'center' }}><h1 style={{ fontSize: 154 * fontScale, fontWeight: 900, lineHeight: 1.16, margin: 0, overflowWrap: 'anywhere', textWrap: 'balance', width: '100%' }}>{title}</h1></div> : <h1 style={{ fontSize: 64 * fontScale, fontWeight: 900, lineHeight: 1.3, margin: 0, overflowWrap: 'anywhere' }}>{title}</h1>)}
+        {effectiveImage && (content.kind === 'cover' ? <div style={{ minHeight: 0, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><CoverImage key={effectiveImage} src={effectiveImage} boxWidth={custom.width * 10.8} boxHeight={Math.max(1, (custom.height * 14.4 - 28) / 2)} /></div> : <img src={effectiveImage} alt="原图素材" style={{ width: '100%', height: '38%', minHeight: 0, objectFit: 'contain', flexShrink: 0 }} />)}
+        {text && <CardRichText style={{ fontSize: 44 * fontScale, lineHeight: 1.5, margin: 0, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }} text={text} accent={theme.accent} headingFont={theme.titleFamily ?? theme.sans} />}
       </div>
     </div>;
   }
@@ -184,7 +212,7 @@ export function CardItem({ content, layout, brandName, image, referenceVisual, e
     const text = content.kind === 'section' ? content.paragraph ?? '' : content.kind === 'cover' ? content.subtitle ?? '' : '';
     const title = content.kind === 'cover' ? content.title ?? '' : content.kind === 'section' ? content.heading ?? '' : '记住这几点';
     const templateImage = effectiveImage;
-    const textHtml = text.split(/\n+/).filter(Boolean).map(line => `<p>${escapeHtml(line)}</p>`).join('');
+    const textHtml = cardTextToHtml(text);
     const safeContent = templateImage
       ? `<img alt="原图素材，完整保留" src="${escapeHtml(templateImage)}" style="display:block;width:100%;height:230px;object-fit:contain;margin:0 auto 12px;background:transparent;border:0;border-radius:0;padding:0" />${textHtml}`
       : textHtml;
@@ -355,7 +383,6 @@ function PhotoSection({
   note: string;
   image: string;
 }) {
-  const heading = content.heading ?? '内容要点';
   const paragraph = content.paragraph ?? '';
   const no = String(content.sectionNo ?? 1).padStart(2, '0');
   const size = bodyFontSize(paragraph, 34);
@@ -405,20 +432,8 @@ function PhotoSection({
           </span>
           <div style={{ flex: 1, height: 2, backgroundColor: theme.accentSoft }} />
         </div>
-        <h2
-          style={{
-            margin: '30px 0 0',
-            fontSize: 46,
-            fontWeight: theme.titleWeight ?? 900,
-            lineHeight: 1.32,
-            color: theme.fg,
-          }}
-        >
-          {heading}
-        </h2>
-        <p style={{ margin: '26px 0 0', fontSize: size, lineHeight: 1.82, color: theme.fg }}>
-          {paragraph}
-        </p>
+        <CardRichText style={{ margin: '36px 0 0', fontSize: size, lineHeight: 1.82, color: theme.fg }} text={paragraph} title={content.heading} accent={theme.accent} headingFont={theme.titleFamily ?? theme.sans} />
+        <EndTagRow tags={content.tags} theme={theme} />
       </div>
       {/* 底部信息 */}
       <div style={{ position: 'absolute', bottom: 60, left: 90, right: 90 }}>
@@ -641,7 +656,6 @@ function ReferenceSection({
   note: string;
   image: string;
 }) {
-  const heading = content.heading ?? '内容要点';
   const paragraph = content.paragraph ?? '';
   const no = String(content.sectionNo ?? 1).padStart(2, '0');
   const size = bodyFontSize(paragraph, 32);
@@ -667,20 +681,8 @@ function ReferenceSection({
           </span>
           <div style={{ flex: 1, height: 2, backgroundColor: theme.accentSoft }} />
         </div>
-        <h2
-          style={{
-            margin: '28px 0 0',
-            fontSize: 46,
-            fontWeight: theme.titleWeight ?? 900,
-            lineHeight: 1.32,
-            color: theme.fg,
-          }}
-        >
-          {heading}
-        </h2>
-        <p style={{ margin: '24px 0 0', fontSize: size, lineHeight: 1.78, color: theme.fg }}>
-          {paragraph}
-        </p>
+        <CardRichText style={{ margin: '36px 0 0', fontSize: size, lineHeight: 1.78, color: theme.fg }} text={paragraph} title={content.heading} accent={theme.accent} headingFont={theme.titleFamily ?? theme.sans} />
+        <EndTagRow tags={content.tags} theme={theme} />
       </div>
       {/* 底部信息 */}
       <div style={{ position: 'absolute', bottom: 60, left: 90, right: 90 }}>
@@ -944,7 +946,6 @@ function Section({
   brand: string;
   note: string;
 }) {
-  const heading = content.heading ?? '内容要点';
   const paragraph = content.paragraph ?? '';
   const no = String(content.sectionNo ?? 1).padStart(2, '0');
 
@@ -953,11 +954,9 @@ function Section({
     return (
       <>
         <p style={{ position: 'absolute', top: 30, right: 70, margin: 0, fontSize: 250, fontWeight: theme.titleWeight ?? 900, color: 'rgba(17,17,17,0.06)', lineHeight: 1 }}>{no}</p>
-        <div style={{ position: 'absolute', top: 180, left: 90, right: 90 }}>
-          <h2 style={{ margin: 0, display: 'inline-block', fontSize: 58, fontWeight: theme.titleWeight ?? 900, color: theme.fg, borderBottom: `8px solid ${theme.accent}`, paddingBottom: 16, lineHeight: 1.3 }}>{heading}</h2>
-        </div>
-        <div style={{ position: 'absolute', top: 400, left: 90, right: 90 }}>
-          <p style={{ margin: 0, fontSize: size, lineHeight: 1.92, color: '#2E2B26' }}>{paragraph}</p>
+        <div style={{ position: 'absolute', top: 210, left: 90, right: 90 }}>
+          <CardRichText style={{ margin: 0, fontSize: size, lineHeight: 1.92, color: '#2E2B26' }} text={paragraph} title={content.heading} accent={theme.accent} headingFont={theme.titleFamily ?? theme.sans} />
+          <EndTagRow tags={content.tags} theme={theme} />
         </div>
         <div style={{ position: 'absolute', bottom: 88, left: 90, right: 90 }}>
           <div style={{ height: 2, backgroundColor: 'rgba(17,17,17,0.12)', marginBottom: 26 }} />
@@ -979,11 +978,9 @@ function Section({
           <span style={{ fontSize: 40, color: theme.accent, fontFamily: theme.serif }}>{`No.${no}`}</span>
           <div style={{ flex: 1, height: 1, backgroundColor: 'rgba(160,131,72,0.5)' }} />
         </div>
-        <div style={{ position: 'absolute', top: 230, left: 110, right: 110 }}>
-          <h2 style={{ margin: 0, fontSize: 56, fontWeight: 700, color: theme.fg, fontFamily: theme.serif, lineHeight: 1.4 }}>{heading}</h2>
-        </div>
-        <div style={{ position: 'absolute', top: 420, left: 110, right: 110 }}>
-          <p style={{ margin: 0, fontSize: size, lineHeight: 2.05, color: '#2C2822', fontFamily: theme.serif, textAlign: 'justify' }}>{paragraph}</p>
+        <div style={{ position: 'absolute', top: 240, left: 110, right: 110 }}>
+          <CardRichText style={{ margin: 0, fontSize: size, lineHeight: 2.05, color: '#2C2822', fontFamily: theme.serif, textAlign: 'justify' }} text={paragraph} title={content.heading} accent={theme.accent} headingFont={theme.titleFamily ?? theme.sans} />
+          <EndTagRow tags={content.tags} theme={theme} />
         </div>
         <div style={{ position: 'absolute', bottom: 100, left: 0, right: 0, textAlign: 'center' }}>
           <p style={{ margin: 0, fontSize: 26, color: theme.fgSoft, fontFamily: theme.serif }}>{`— ${no} —`}</p>
@@ -1024,12 +1021,9 @@ function Section({
           }}
         >
           <p style={{ margin: 0, fontSize: 26, letterSpacing: 6, color: theme.accent, fontWeight: 500 }}>{`NOTE ${no}`}</p>
-          <div style={{ position: 'relative', display: 'inline-block', marginTop: 26 }}>
-            <span style={{ position: 'relative', zIndex: 1, fontSize: 52, fontWeight: 800, color: theme.fg, lineHeight: 1.4 }}>{heading}</span>
-            <span style={{ position: 'absolute', left: -8, right: -8, bottom: 4, height: 22, backgroundColor: '#FFE58A', zIndex: 0 }} />
-          </div>
-          <div style={{ marginTop: 46, width: 100, borderBottom: '3px dashed #F3CFA9' }} />
-          <p style={{ margin: '44px 0 0', fontSize: size, lineHeight: 2.0, color: '#5A4F44' }}>{paragraph}</p>
+          <div style={{ marginTop: 30, width: 100, borderBottom: '3px dashed #F3CFA9' }} />
+          <CardRichText style={{ margin: '34px 0 0', fontSize: size, lineHeight: 2.0, color: '#5A4F44' }} text={paragraph} title={content.heading} accent={theme.accent} headingFont={theme.titleFamily ?? theme.sans} />
+          <EndTagRow tags={content.tags} theme={theme} />
         </div>
         <div style={{ position: 'absolute', bottom: 96, left: 0, right: 0, textAlign: 'center' }}>
           <p style={{ margin: 0, fontSize: 24, color: theme.fgSoft }}>{`♥ ${pageLabel(content)} · ${brand}`}</p>
@@ -1044,13 +1038,10 @@ function Section({
     return (
       <>
         <p style={{ position: 'absolute', top: 40, right: 80, margin: 0, fontSize: 210, fontWeight: theme.titleWeight ?? 900, color: theme.accent, lineHeight: 1 }}>{no}</p>
-        <div style={{ position: 'absolute', top: 280, left: 90 }}>
-          <span style={{ display: 'inline-block', backgroundColor: theme.fg, color: '#FFD93D', fontSize: 50, fontWeight: theme.titleWeight ?? 900, padding: '12px 30px' }}>{heading}</span>
-        </div>
         <div
           style={{
             position: 'absolute',
-            top: 470,
+            top: 300,
             left: 90,
             right: 90,
             bottom: 200,
@@ -1059,7 +1050,8 @@ function Section({
             padding: '56px 52px',
           }}
         >
-          <p style={{ margin: 0, fontSize: size, lineHeight: 1.9, color: '#111111' }}>{paragraph}</p>
+          <CardRichText style={{ margin: 0, fontSize: size, lineHeight: 1.9, color: '#111111' }} text={paragraph} title={content.heading} accent={theme.accent} headingFont={theme.titleFamily ?? theme.sans} />
+          <EndTagRow tags={content.tags} theme={theme} />
         </div>
         <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 120, backgroundColor: theme.fg, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 90px' }}>
           <span style={{ fontSize: 24, color: 'rgba(255,255,255,0.82)' }}>{note}</span>
@@ -1078,10 +1070,8 @@ function Section({
           <div style={{ marginTop: 18, width: 220, height: 1, backgroundColor: 'rgba(201,169,106,0.55)' }} />
         </div>
         <div style={{ position: 'absolute', top: 360, left: 110, right: 110 }}>
-          <h2 style={{ margin: 0, fontSize: 54, fontWeight: 600, color: theme.fg, fontFamily: theme.serif, lineHeight: 1.45 }}>{heading}</h2>
-        </div>
-        <div style={{ position: 'absolute', top: 540, left: 110, right: 110 }}>
-          <p style={{ margin: 0, fontSize: size, lineHeight: 2.0, color: 'rgba(242,237,227,0.88)', fontFamily: theme.serif, textAlign: 'justify' }}>{paragraph}</p>
+          <CardRichText style={{ margin: 0, fontSize: size, lineHeight: 2.0, color: 'rgba(242,237,227,0.88)', fontFamily: theme.serif, textAlign: 'justify' }} text={paragraph} title={content.heading} accent={theme.accent} headingFont={theme.titleFamily ?? theme.sans} />
+          <EndTagRow tags={content.tags} theme={theme} />
         </div>
         <div style={{ position: 'absolute', bottom: 96, left: 0, right: 0, textAlign: 'center' }}>
           <p style={{ margin: 0, fontSize: 24, letterSpacing: 4, color: theme.accent }}>{`${pageLabel(content)} · ${brand}`}</p>
@@ -1530,7 +1520,6 @@ function CoverX({ content, theme, layout, brand, note }: ExtProps) {
 }
 
 function SectionX({ content, theme, layout, brand, note }: ExtProps) {
-  const heading = content.heading ?? '内容要点';
   const paragraph = content.paragraph ?? '';
   const no = String(content.sectionNo ?? 1).padStart(2, '0');
   const mono = theme.mono ?? theme.sans;
@@ -1545,8 +1534,8 @@ function SectionX({ content, theme, layout, brand, note }: ExtProps) {
               <span style={{ fontSize: 26, color: '#FFFFFF', backgroundColor: theme.accent, borderRadius: 999, padding: '10px 24px', fontWeight: 700 }}>{`PHOTO ${no}`}</span>
               <div style={{ flex: 1, height: 1, backgroundColor: 'rgba(43,40,34,0.14)' }} />
             </div>
-            <h2 style={{ margin: '46px 0 0', fontSize: 54, fontWeight: theme.titleWeight ?? 900, color: theme.fg, lineHeight: 1.4 }}>{heading}</h2>
-            <p style={{ margin: '42px 0 0', fontSize: size, lineHeight: 1.95, color: '#3D382F' }}>{paragraph}</p>
+            <CardRichText style={{ margin: '40px 0 0', fontSize: size, lineHeight: 1.95, color: '#3D382F' }} text={paragraph} title={content.heading} accent={theme.accent} headingFont={theme.titleFamily ?? theme.sans} />
+            <EndTagRow tags={content.tags} theme={theme} />
           </div>
           <div style={{ position: 'absolute', bottom: 110, left: 0, right: 0, textAlign: 'center' }}>
             <p style={{ margin: 0, fontSize: 24, color: theme.fgSoft, fontFamily: theme.serif, fontStyle: 'italic' }}>{`${brand} · ${pageLabel(content)}`}</p>
@@ -1562,9 +1551,9 @@ function SectionX({ content, theme, layout, brand, note }: ExtProps) {
         <>
           <div style={{ position: 'absolute', top: 70, left: 90, right: 90, bottom: 200, backgroundColor: '#10101B', border: '2px solid #262640', borderRadius: 16, padding: '44px 42px' }}>
             <p style={{ margin: 0, fontSize: 24, color: theme.accent, fontFamily: mono }}>{`$ grep "part-${no}" note.txt`}</p>
-            <h2 style={{ margin: '34px 0 0', fontSize: 50, fontWeight: 700, color: theme.fg, fontFamily: mono, lineHeight: 1.4 }}>{heading}</h2>
-            <div style={{ marginTop: 30, height: 2, backgroundColor: 'rgba(61,220,132,0.3)' }} />
-            <p style={{ margin: '34px 0 0', fontSize: size, lineHeight: 1.95, color: 'rgba(215,245,221,0.85)', fontFamily: mono }}>{paragraph}</p>
+            <div style={{ marginTop: 32, height: 2, backgroundColor: 'rgba(61,220,132,0.3)' }} />
+            <CardRichText style={{ margin: '32px 0 0', fontSize: size, lineHeight: 1.95, color: 'rgba(215,245,221,0.85)', fontFamily: mono }} text={paragraph} title={content.heading} accent={theme.accent} headingFont={theme.titleFamily ?? theme.sans} />
+            <EndTagRow tags={content.tags} theme={theme} />
             <p style={{ margin: '30px 0 0', fontSize: 24, color: theme.accent, fontFamily: mono }}>$ _</p>
           </div>
           <div style={{ position: 'absolute', bottom: 110, left: 0, right: 0, textAlign: 'center' }}>
@@ -1583,9 +1572,9 @@ function SectionX({ content, theme, layout, brand, note }: ExtProps) {
               <span style={{ fontSize: 34, color: theme.accent, fontFamily: theme.serif, fontWeight: 700 }}>{`第 ${no} 版`}</span>
               <span style={{ fontSize: 22, color: theme.fgSoft, fontFamily: theme.serif }}>{brand}</span>
             </div>
-            <h2 style={{ margin: '40px 0 0', fontSize: 56, fontWeight: theme.titleWeight ?? 900, color: theme.fg, fontFamily: theme.serif, lineHeight: 1.4 }}>{heading}</h2>
-            <div style={{ marginTop: 32, width: 100, height: 6, backgroundColor: theme.accent }} />
-            <p style={{ margin: '40px 0 0', fontSize: size, lineHeight: 2.0, color: '#2E2818', fontFamily: theme.serif, textAlign: 'justify' }}>{paragraph}</p>
+            <div style={{ marginTop: 34, width: 100, height: 6, backgroundColor: theme.accent }} />
+            <CardRichText style={{ margin: '36px 0 0', fontSize: size, lineHeight: 2.0, color: '#2E2818', fontFamily: theme.serif, textAlign: 'justify' }} text={paragraph} title={content.heading} accent={theme.accent} headingFont={theme.titleFamily ?? theme.sans} />
+            <EndTagRow tags={content.tags} theme={theme} />
           </div>
           <div style={{ position: 'absolute', bottom: 100, left: 90, right: 90 }}>
             <div style={{ borderTop: `1px solid ${theme.fg}`, borderBottom: `4px solid ${theme.fg}`, height: 6, marginBottom: 22 }} />
@@ -1606,8 +1595,8 @@ function SectionX({ content, theme, layout, brand, note }: ExtProps) {
               <span style={{ fontSize: 27, color: theme.fgSoft, letterSpacing: 4 }}>{`NOTE ${no}`}</span>
               <div style={{ flex: 1, height: 1, backgroundColor: 'rgba(255,95,151,0.3)' }} />
             </div>
-            <h2 style={{ margin: '44px 0 0', fontSize: 54, fontWeight: theme.titleWeight ?? 900, color: theme.fg, lineHeight: 1.4 }}>{heading}</h2>
-            <p style={{ margin: '40px 0 0', fontSize: size, lineHeight: 2.0, color: '#5C3A4C' }}>{paragraph}</p>
+            <CardRichText style={{ margin: '40px 0 0', fontSize: size, lineHeight: 2.0, color: '#5C3A4C' }} text={paragraph} title={content.heading} accent={theme.accent} headingFont={theme.titleFamily ?? theme.sans} />
+            <EndTagRow tags={content.tags} theme={theme} />
           </div>
           <div style={{ position: 'absolute', bottom: 110, left: 0, right: 0, textAlign: 'center' }}>
             <p style={{ margin: 0, fontSize: 24, color: theme.fg }}>{`${brand} · ${pageLabel(content)}`}</p>
@@ -1627,8 +1616,8 @@ function SectionX({ content, theme, layout, brand, note }: ExtProps) {
               <div style={{ width: 20, height: 20, borderRadius: '50% 50% 50% 6px', backgroundColor: theme.accent }} />
               <span style={{ fontSize: 26, color: theme.accent, fontWeight: 700, letterSpacing: 4 }}>{`PART ${no}`}</span>
             </div>
-            <h2 style={{ margin: '40px 0 0', fontSize: 54, fontWeight: theme.titleWeight ?? 900, color: theme.fg, lineHeight: 1.4, borderBottom: `6px solid ${theme.accent}`, display: 'inline-block', paddingBottom: 14 }}>{heading}</h2>
-            <p style={{ margin: '42px 0 0', fontSize: size, lineHeight: 2.0, color: '#1E4237' }}>{paragraph}</p>
+            <CardRichText style={{ margin: '44px 0 0', fontSize: size, lineHeight: 2.0, color: '#1E4237' }} text={paragraph} title={content.heading} accent={theme.accent} headingFont={theme.titleFamily ?? theme.sans} />
+            <EndTagRow tags={content.tags} theme={theme} />
           </div>
           <div style={{ position: 'absolute', bottom: 110, left: 0, right: 0, textAlign: 'center' }}>
             <p style={{ margin: 0, fontSize: 24, color: theme.fgSoft }}>{`${brand} · ${pageLabel(content)}`}</p>
@@ -1650,9 +1639,9 @@ function SectionX({ content, theme, layout, brand, note }: ExtProps) {
               <div style={{ width: 22, height: 22, border: '2px solid #FFD447' }} />
               <span style={{ fontSize: 26, color: theme.accent, fontWeight: 700, letterSpacing: 4 }}>{`FIG.${no} / ${String(content.total).padStart(2, '0')}`}</span>
             </div>
-            <h2 style={{ margin: '44px 0 0', fontSize: 54, fontWeight: 800, color: theme.fg, lineHeight: 1.4 }}>{heading}</h2>
-            <div style={{ marginTop: 34, width: 140, height: 3, backgroundColor: theme.accent }} />
-            <p style={{ margin: '40px 0 0', fontSize: size, lineHeight: 2.0, color: 'rgba(234,243,255,0.9)', textAlign: 'justify' }}>{paragraph}</p>
+            <div style={{ marginTop: 36, width: 140, height: 3, backgroundColor: theme.accent }} />
+            <CardRichText style={{ margin: '36px 0 0', fontSize: size, lineHeight: 2.0, color: 'rgba(234,243,255,0.9)', textAlign: 'justify' }} text={paragraph} title={content.heading} accent={theme.accent} headingFont={theme.titleFamily ?? theme.sans} />
+            <EndTagRow tags={content.tags} theme={theme} />
           </div>
           <div style={{ position: 'absolute', bottom: 120, left: 112, right: 112, display: 'flex', justifyContent: 'space-between', fontSize: 22, color: theme.noteColor }}>
             <span>{`${brand} · ${pageLabel(content)}`}</span>
@@ -1668,9 +1657,9 @@ function SectionX({ content, theme, layout, brand, note }: ExtProps) {
         <>
           <div style={{ position: 'absolute', top: 110, left: 100, right: 100, bottom: 220, backgroundColor: '#FFF3A8', transform: 'rotate(-1.2deg)', borderRadius: 10, boxShadow: '0 22px 46px rgba(61,53,36,0.2)', padding: '64px 58px' }}>
             <p style={{ margin: 0, fontSize: 26, color: '#8A7B3A', fontFamily: theme.serif, fontStyle: 'italic' }}>{`Step ${no} · ${brand}`}</p>
-            <h2 style={{ margin: '40px 0 0', fontSize: 52, fontWeight: 800, color: theme.fg, fontFamily: theme.serif, lineHeight: 1.4 }}>{heading}</h2>
             <div style={{ marginTop: 36, borderBottom: '3px dashed rgba(61,53,36,0.22)' }} />
-            <p style={{ margin: '36px 0 0', fontSize: size, lineHeight: 2.0, color: '#4A4128', fontFamily: theme.serif }}>{paragraph}</p>
+            <CardRichText style={{ margin: '32px 0 0', fontSize: size, lineHeight: 2.0, color: '#4A4128', fontFamily: theme.serif }} text={paragraph} title={content.heading} accent={theme.accent} headingFont={theme.titleFamily ?? theme.sans} />
+            <EndTagRow tags={content.tags} theme={theme} />
           </div>
           <div style={{ position: 'absolute', top: 78, left: 470, width: 140, height: 48, backgroundColor: 'rgba(255,255,255,0.55)', transform: 'rotate(-4deg)', border: '1px solid rgba(255,255,255,0.7)' }} />
           <div style={{ position: 'absolute', bottom: 110, left: 0, right: 0, textAlign: 'center' }}>
@@ -1685,13 +1674,13 @@ function SectionX({ content, theme, layout, brand, note }: ExtProps) {
       return (
         <>
           <p style={{ position: 'absolute', top: 60, right: 100, margin: 0, fontSize: 260, fontWeight: 700, color: 'rgba(38,34,26,0.05)', lineHeight: 1, fontFamily: theme.serif }}>{no}</p>
-          <div style={{ position: 'absolute', top: 160, left: 110 }}>
+          <div style={{ position: 'absolute', top: 170, left: 110 }}>
             <p style={{ margin: 0, fontSize: 28, letterSpacing: 10, color: theme.accent, fontFamily: theme.serif }}>{`${brand} · 其${no}`}</p>
-            <h2 style={{ margin: '50px 0 0', fontSize: 54, fontWeight: 700, color: theme.fg, fontFamily: theme.serif, lineHeight: 1.45 }}>{heading}</h2>
-            <div style={{ marginTop: 40, width: 90, height: 2, backgroundColor: theme.accent }} />
+            <div style={{ marginTop: 26, width: 90, height: 2, backgroundColor: theme.accent }} />
           </div>
-          <div style={{ position: 'absolute', top: 490, left: 110, right: 130 }}>
-            <p style={{ margin: 0, fontSize: size, lineHeight: 2.1, color: '#38332A', fontFamily: theme.serif, textAlign: 'justify' }}>{paragraph}</p>
+          <div style={{ position: 'absolute', top: 350, left: 110, right: 130 }}>
+            <CardRichText style={{ margin: 0, fontSize: size, lineHeight: 2.1, color: '#38332A', fontFamily: theme.serif, textAlign: 'justify' }} text={paragraph} title={content.heading} accent={theme.accent} headingFont={theme.titleFamily ?? theme.sans} />
+            <EndTagRow tags={content.tags} theme={theme} />
           </div>
           <div style={{ position: 'absolute', bottom: 110, right: 110 }}>
             <p style={{ margin: 0, fontSize: 20, color: theme.noteColor, fontFamily: theme.serif, textAlign: 'right' }}>{`${note} · ${pageLabel(content)}`}</p>
@@ -1717,8 +1706,8 @@ function SectionX({ content, theme, layout, brand, note }: ExtProps) {
           </div>
           <div style={{ position: 'absolute', top: 110, left: 120, right: 120, bottom: 210, backgroundColor: 'rgba(255,255,255,0.93)', borderRadius: 36, padding: '64px 56px' }}>
             <p style={{ margin: 0, fontSize: 26, letterSpacing: 8, color: '#C2495D', fontWeight: 700 }}>{`REEL ${no}`}</p>
-            <h2 style={{ margin: '40px 0 0', fontSize: 52, fontWeight: theme.titleWeight ?? 900, color: '#7A2540', lineHeight: 1.4 }}>{heading}</h2>
-            <p style={{ margin: '40px 0 0', fontSize: size, lineHeight: 2.0, color: '#6B3D50' }}>{paragraph}</p>
+            <CardRichText style={{ margin: '44px 0 0', fontSize: size, lineHeight: 2.0, color: '#6B3D50' }} text={paragraph} title={content.heading} accent={theme.accent} headingFont={theme.titleFamily ?? theme.sans} />
+            <EndTagRow tags={content.tags} theme={theme} />
           </div>
           <div style={{ position: 'absolute', bottom: 110, left: 120, right: 120, display: 'flex', justifyContent: 'space-between', fontSize: 22, color: 'rgba(255,255,255,0.72)' }}>
             <span>{`${brand} · ${note}`}</span>
@@ -1739,8 +1728,8 @@ function SectionX({ content, theme, layout, brand, note }: ExtProps) {
               </div>
               <div style={{ flex: 1, height: 2, backgroundColor: '#EBDDF8', borderRadius: 999 }} />
             </div>
-            <h2 style={{ margin: '44px 0 0', fontSize: 52, fontWeight: theme.titleWeight ?? 900, color: theme.fg, lineHeight: 1.4 }}>{heading}</h2>
-            <p style={{ margin: '40px 0 0', fontSize: size, lineHeight: 2.0, color: '#4C3F6E' }}>{paragraph}</p>
+            <CardRichText style={{ margin: '48px 0 0', fontSize: size, lineHeight: 2.0, color: '#4C3F6E' }} text={paragraph} title={content.heading} accent={theme.accent} headingFont={theme.titleFamily ?? theme.sans} />
+            <EndTagRow tags={content.tags} theme={theme} />
           </div>
           <div style={{ position: 'absolute', bottom: 110, left: 0, right: 0, textAlign: 'center' }}>
             <p style={{ margin: 0, fontSize: 24, color: theme.fgSoft }}>{`${brand} · ${pageLabel(content)}`}</p>
@@ -1764,10 +1753,10 @@ function SectionX({ content, theme, layout, brand, note }: ExtProps) {
           </div>
           <div style={{ position: 'absolute', top: 210, left: 150, right: 150 }}>
             <span style={{ display: 'inline-block', backgroundColor: teal, color: '#141428', fontSize: 28, fontWeight: theme.titleWeight ?? 900, padding: '8px 22px' }}>{`STAGE ${no}`}</span>
-            <h2 style={{ margin: '40px 0 0', fontSize: 52, fontWeight: theme.titleWeight ?? 900, color: theme.fg, lineHeight: 1.4 }}>{heading}</h2>
           </div>
-          <div style={{ position: 'absolute', top: 560, left: 150, right: 150, bottom: 200, border: `4px solid ${theme.accent}`, padding: '40px 38px' }}>
-            <p style={{ margin: 0, fontSize: size, lineHeight: 1.95, color: theme.fg }}>{paragraph}</p>
+          <div style={{ position: 'absolute', top: 380, left: 150, right: 150, bottom: 200, border: `4px solid ${theme.accent}`, padding: '40px 38px' }}>
+            <CardRichText style={{ margin: 0, fontSize: size, lineHeight: 1.95, color: theme.fg }} text={paragraph} title={content.heading} accent={theme.accent} headingFont={theme.titleFamily ?? theme.sans} />
+            <EndTagRow tags={content.tags} theme={theme} />
           </div>
           <div style={{ position: 'absolute', bottom: 135, left: 0, right: 0, textAlign: 'center' }}>
             <p style={{ margin: 0, fontSize: 22, color: theme.noteColor }}>{`${brand} · ${pageLabel(content)} · ${note}`}</p>
@@ -2300,7 +2289,6 @@ function GenericSection({
   brand: string;
   note: string;
 }) {
-  const heading = content.heading ?? '要点';
   const paragraph = content.paragraph ?? '';
   const k = theme.fontScale ?? 1;
   const size = Math.round(bodyFontSize(paragraph, 36) * k);
@@ -2311,17 +2299,6 @@ function GenericSection({
   const label = pageLabel(content);
   const numberText = String(content.sectionNo ?? 1).padStart(2, '0');
   const comp = theme.composition ?? 'stack';
-  const headingCss = {
-    margin: 0,
-    fontSize: Math.round(62 * k),
-    lineHeight: 1.3,
-    color: theme.fg,
-    fontFamily: family,
-    fontWeight: theme.titleWeight ?? 900,
-    letterSpacing: theme.titleSpacing ?? 0,
-    fontStyle: theme.titleItalic ? ('italic' as const) : ('normal' as const),
-    textAlign: tAlign,
-  };
   const foot = (
     <div style={{ position: 'absolute', bottom: 92, left: 104, right: 104, display: 'flex', justifyContent: 'space-between', fontSize: 22, color: theme.noteColor }}>
       <span>{note}</span>
@@ -2337,9 +2314,9 @@ function GenericSection({
           <span style={{ fontSize: 24, letterSpacing: 6, color: '#FFFFFF', opacity: 0.9 }}>{brand}</span>
         </div>
         <div style={{ position: 'absolute', top: 150, bottom: 130, left: [350, 390, 430, 470][theme.variant ?? 0], right: 96, display: 'flex', flexDirection: 'column', alignItems: items, justifyContent: 'flex-start' }}>
-          <h2 style={headingCss}>{heading}</h2>
           <Divider d={theme.dividerStyle} theme={theme} width={148} />
-          <p style={{ margin: '26px 0 0', fontSize: size, lineHeight: 1.9, color: theme.fg, whiteSpace: 'pre-wrap', textAlign: tAlign }}>{paragraph}</p>
+          <CardRichText style={{ margin: '40px 0 0', fontSize: size, lineHeight: 1.9, color: theme.fg, whiteSpace: 'pre-wrap', textAlign: tAlign }} text={paragraph} title={content.heading} accent={theme.accent} headingFont={theme.titleFamily ?? theme.sans} />
+          <EndTagRow tags={content.tags} theme={theme} />
         </div>
         {foot}
       </>
@@ -2349,13 +2326,13 @@ function GenericSection({
   if (comp === 'bandtop') {
     return (
       <>
-        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 320, backgroundColor: theme.accent, display: 'flex', alignItems: 'center', padding: '0 96px' }}>
-          <h2 style={{ ...headingCss, color: '#FFFFFF', fontSize: Math.min(Math.round(62 * k), Math.round(72 * k)) }}>{heading}</h2>
+        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 190, backgroundColor: theme.accent, display: 'flex', alignItems: 'center', justifyContent: items, padding: '0 96px' }}>
+          <span style={{ fontSize: 26, letterSpacing: 6, color: '#FFFFFF', fontWeight: 700 }}>{`${brand} · ${label}`}</span>
         </div>
-        <div style={{ position: 'absolute', top: 380, left: 104, right: 104, bottom: 130 }}>
-          <p style={{ margin: 0, fontSize: 24, letterSpacing: 4, color: theme.accent, fontWeight: 700 }}>{`${brand} · ${label}`}</p>
+        <div style={{ position: 'absolute', top: 270, left: 104, right: 104, bottom: 130 }}>
           <Divider d={theme.dividerStyle} theme={theme} width={148} />
-          <p style={{ margin: '26px 0 0', fontSize: size, lineHeight: 1.9, color: theme.fg, whiteSpace: 'pre-wrap' }}>{paragraph}</p>
+          <CardRichText style={{ margin: '34px 0 0', fontSize: size, lineHeight: 1.9, color: theme.fg, whiteSpace: 'pre-wrap' }} text={paragraph} title={content.heading} accent={theme.accent} headingFont={theme.titleFamily ?? theme.sans} />
+          <EndTagRow tags={content.tags} theme={theme} />
         </div>
         {foot}
       </>
@@ -2370,10 +2347,10 @@ function GenericSection({
         <span style={{ width: 28, height: 6, backgroundColor: theme.accent }} />
         <span style={{ fontSize: 24, letterSpacing: 4, color: theme.fgSoft }}>{`${brand} · ${label}`}</span>
       </div>
-      <div style={{ position: 'absolute', top: 296, bottom: 168, left: 104, right: 104, display: 'flex', flexDirection: 'column', alignItems: items }}>
-        <h2 style={headingCss}>{heading}</h2>
+      <div style={{ position: 'absolute', top: 250, bottom: 168, left: 104, right: 104, display: 'flex', flexDirection: 'column', alignItems: items }}>
         <Divider d={theme.dividerStyle} theme={theme} width={148} />
-        <p style={{ margin: '30px 0 0', fontSize: size, lineHeight: 1.9, color: theme.fg, whiteSpace: 'pre-wrap', textAlign: tAlign }}>{paragraph}</p>
+        <CardRichText style={{ margin: '36px 0 0', fontSize: size, lineHeight: 1.9, color: theme.fg, whiteSpace: 'pre-wrap', textAlign: tAlign }} text={paragraph} title={content.heading} accent={theme.accent} headingFont={theme.titleFamily ?? theme.sans} />
+        <EndTagRow tags={content.tags} theme={theme} />
       </div>
       {foot}
     </>

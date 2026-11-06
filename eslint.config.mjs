@@ -23,6 +23,7 @@ const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
   {
+    files: ['**/*.{ts,tsx}'],
     settings: {
       // node_modules 里的 barrel 包（lucide-react 等）不参与 ExportMap 构建，
       // import/no-cycle 只需要项目源码的依赖图。
@@ -45,14 +46,18 @@ const eslintConfig = defineConfig([
     // Default ignores of eslint-config-next (trailing slash prunes the whole
     // directory instead of walking into it):
     '.next/',
+    '.next-deploy-check/',
     'out/',
     'build/',
     'next-env.d.ts',
     // Build artifacts:
     'server.js',
     'dist/',
+    'dist-deploy-check/',
+    'test-artifacts/',
     // Script files (CommonJS):
     'scripts/**/*.js',
+    'scripts/**/*.cjs',
   ]),
 ]);
 

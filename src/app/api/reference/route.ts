@@ -1,14 +1,9 @@
+import { RoutedTextClient as LLMClient } from '@/lib/text-client';
 import { NextRequest } from 'next/server';
-import { Config, HeaderUtils, LLMClient, Message } from 'coze-coding-dev-sdk';
+import { Config, HeaderUtils, Message } from 'coze-coding-dev-sdk';
 import type { ContentPart } from 'coze-coding-dev-sdk';
 import type { ReferenceGenerateRequest, StreamEvent } from '@/lib/types';
-import {
-  getTextModel,
-  isDeepseekModel,
-  sanitizeDeepseekBaseUrl,
-  sanitizeDeepseekModelId,
-} from '@/lib/model';
-import { streamDeepseek } from '@/lib/deepseek';
+import { getTextModel } from '@/lib/model';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -42,19 +37,6 @@ function normalizeRequest(raw: unknown): ReferenceGenerateRequest | null {
     topic,
     images,
     modelId: getTextModel(obj.modelId).id,
-    deepseekKey:
-      typeof obj.deepseekKey === 'string' && obj.deepseekKey.trim()
-        ? obj.deepseekKey.trim()
-        : undefined,
-    deepseekBaseUrl:
-      typeof obj.deepseekBaseUrl === 'string' && obj.deepseekBaseUrl.trim()
-        ? obj.deepseekBaseUrl.trim()
-        : undefined,
-    deepseekModelId:
-      typeof obj.deepseekModelId === 'string' && obj.deepseekModelId.trim()
-        ? obj.deepseekModelId.trim()
-        : undefined,
-    deepseekVision: obj.deepseekVision === true,
   };
 }
 
@@ -86,30 +68,9 @@ export async function POST(request: NextRequest) {
   }
 
   const model = getTextModel(req.modelId);
-  const useDeepseek = isDeepseekModel(model);
-
-  // DeepSeek 走自有 Key 直连：优先用户设置页配置，缺省回落服务端预配置（环境变量）
-  const presetKey = process.env.DEEPSEEK_API_KEY?.trim() || undefined;
-  const effectiveKey = req.deepseekKey ?? presetKey;
-
-  // 完全无 Key 时给出明确指引
-  if (useDeepseek && !effectiveKey) {
-    return Response.json(
-      {
-        error:
-          '未配置 DeepSeek API Key：请先在「设置」页填写你的 Key，再选择 DeepSeek 模型',
-      },
-      { status: 400 },
-    );
-  }
-
-  // DeepSeek 通道读图：用户本地声明开启，或服务端预配置开启
-  const deepseekVision =
-    useDeepseek &&
-    (model.supportsImage || req.deepseekVision === true || process.env.DEEPSEEK_VISION === '1');
 
   // 仅文本模型不支持读图：丢弃参考图
-  if (!model.supportsImage && !deepseekVision) {
+  if (!model.supportsImage) {
     req.images = [];
     if (!req.topic) {
       return Response.json(
@@ -149,7 +110,6 @@ export async function POST(request: NextRequest) {
   const customHeaders = HeaderUtils.extractForwardHeaders(request.headers);
   const config = new Config();
   const client = new LLMClient(config, customHeaders);
-  const userText = textLines.join('\n');
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -159,56 +119,21 @@ export async function POST(request: NextRequest) {
       };
 
       try {
-        if (useDeepseek && effectiveKey) {
-          // DeepSeek 兼容接口直连：请求体字段优先，缺省回落服务端预配置
-          const baseUrl = sanitizeDeepseekBaseUrl(
-            req.deepseekBaseUrl ?? process.env.DEEPSEEK_BASE_URL,
-          );
-          const modelId = sanitizeDeepseekModelId(
-            model.relayModelId ??
-              req.deepseekModelId ??
-              process.env.DEEPSEEK_MODEL_ID,
-          );
-          await streamDeepseek({
-            modelId,
-            apiKey: effectiveKey,
-            apiUrl: `${baseUrl}/chat/completions`,
-            messages: [
-              { role: 'system', content: SYSTEM_PROMPT },
-              {
-                role: 'user',
-                content: deepseekVision
-                  ? parts.map((p) =>
-                      p.type === 'text'
-                        ? { type: 'text' as const, text: p.text ?? '' }
-                        : {
-                            type: 'image_url' as const,
-                            image_url: { url: p.image_url?.url ?? '' },
-                          },
-                    )
-                  : userText,
-              },
-            ],
-            temperature: 0.9,
-            safeEnqueue,
-          });
-        } else {
-          const llmStream = client.stream(messages, {
-            model: model.id,
-            thinking: 'disabled',
-            temperature: 0.9,
-            streaming: true,
-          });
+        const llmStream = client.stream(messages, {
+          model: model.id,
+          thinking: 'disabled',
+          temperature: 0.9,
+          streaming: true,
+        });
 
-          for await (const chunk of llmStream) {
-            if (chunk.content) {
-              const text =
-                typeof chunk.content === 'string'
-                  ? chunk.content
-                  : JSON.stringify(chunk.content);
-              if (text) {
-                safeEnqueue({ type: 'delta', text });
-              }
+        for await (const chunk of llmStream) {
+          if (chunk.content) {
+            const text =
+              typeof chunk.content === 'string'
+                ? chunk.content
+                : JSON.stringify(chunk.content);
+            if (text) {
+              safeEnqueue({ type: 'delta', text });
             }
           }
         }
@@ -235,4 +160,3 @@ export async function POST(request: NextRequest) {
     },
   });
 }
-

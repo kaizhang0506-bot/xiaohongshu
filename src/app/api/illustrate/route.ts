@@ -7,13 +7,7 @@ import {
   type ContentPart,
   type Message,
 } from 'coze-coding-dev-sdk';
-import {
-  DEFAULT_IMAGE_RELAY_BASE_URL,
-  RELAY_IMAGE_SIZE,
-  getImageModel,
-  isRelayImageModel,
-  sanitizeDeepseekBaseUrl,
-} from '@/lib/model';
+import { getImageModel } from '@/lib/model';
 
 export const maxDuration = 150;
 
@@ -25,8 +19,6 @@ const FALLBACK_SIZE = '2K';
 const PROMPT_MODEL_ID = 'doubao-seed-2-0-mini-260215';
 
 interface IllustrateBody {
-  relayKey?: string;
-  relayBaseUrl?: string;
   title?: string;
   summary?: string;
   /** 笔记正文（用于理解主题，画面的相关性由它决定） */
@@ -181,7 +173,7 @@ function buildPrompt(
   ].join('');
 }
 
-/** 依据二进制魔数判断真实图片 MIME（中转站 CDN 可能返回 octet-stream） */
+/** 依据二进制魔数判断真实图片 MIME */
 function sniffMime(buffer: Buffer, fallback: string): string {
   if (buffer.length >= 8 && buffer[0] === 0x89 && buffer[1] === 0x50) {
     return 'image/png';
@@ -212,70 +204,10 @@ async function fetchAsDataUrl(url: string): Promise<string | null> {
   }
 }
 
-/**
- * 中转站生图通道（OpenAI 兼容 /images/generations）
- * 服务端预配置密钥：IMAGE_API_KEY 优先，缺省复用 DEEPSEEK_API_KEY
- */
-async function generateViaRelay(
-  prompt: string,
-  modelId: string,
-  relayKey?: string,
-  relayBaseUrl?: string,
-): Promise<string | null> {
-  const apiKey = (relayKey || process.env.IMAGE_API_KEY || process.env.DEEPSEEK_API_KEY || '').trim();
-  if (!apiKey) {
-    console.warn('[api/illustrate] relay 图像通道缺少密钥配置');
-    return null;
-  }
-  const baseUrl = sanitizeDeepseekBaseUrl(
-    relayBaseUrl || process.env.IMAGE_BASE_URL ||
-      process.env.DEEPSEEK_BASE_URL ||
-      DEFAULT_IMAGE_RELAY_BASE_URL,
-  );
-  try {
-    const res = await fetch(`${baseUrl.replace(/\/+$/, '')}/images/generations`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: modelId,
-        prompt,
-        n: 1,
-        size: RELAY_IMAGE_SIZE,
-      }),
-      signal: AbortSignal.timeout(120_000),
-    });
-    if (!res.ok) {
-      const detail = await res.text();
-      console.warn(
-        '[api/illustrate] relay 生图失败:',
-        res.status,
-        detail.slice(0, 300),
-      );
-      return null;
-    }
-    const payload = (await res.json()) as {
-      data?: Array<{ b64_json?: string; url?: string }>;
-    };
-    const item = payload.data?.[0];
-    if (item?.b64_json) {
-      const mime = item.b64_json.startsWith('/9j/') ? 'image/jpeg' : 'image/png';
-      return `data:${mime};base64,${item.b64_json}`;
-    }
-    if (item?.url) {
-      return await fetchAsDataUrl(item.url);
-    }
-    console.warn('[api/illustrate] relay 生图返回为空');
-    return null;
-  } catch (error) {
-    console.warn('[api/illustrate] relay 生图异常:', error);
-    return null;
-  }
-}
-
 export async function POST(request: NextRequest) {
+  if (process.env.ENABLE_LEGACY_AI_IMAGES !== '1') {
+    return NextResponse.json({ error: '当前使用内置模板与上传原图，不需要生图。遗留扣子生图接口默认关闭。' }, { status: 410 });
+  }
   try {
     const body = (await request.json()) as IllustrateBody;
     const title = (body.title ?? '').trim();
@@ -326,18 +258,6 @@ export async function POST(request: NextRequest) {
 
     // 解析所选配图模型（白名单校验，未命中回退默认）
     const model = getImageModel(body.modelId);
-
-    // 中转站通道（如 gpt-image-2.5-sunburst）：OpenAI 兼容 /images/generations
-    if (isRelayImageModel(model)) {
-      const relayImage = await generateViaRelay(prompt, model.id, body.relayKey, body.relayBaseUrl);
-      if (relayImage) {
-        return NextResponse.json({ image: relayImage, scene });
-      }
-      return NextResponse.json(
-        { error: '配图生成失败，请稍后重试或切换其他配图模型' },
-        { status: 502 },
-      );
-    }
 
     const customHeaders = HeaderUtils.extractForwardHeaders(request.headers);
     const config = new Config();
@@ -390,4 +310,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-

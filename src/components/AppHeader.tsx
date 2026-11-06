@@ -2,11 +2,13 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { BookOpenText, Settings2, Sparkles } from 'lucide-react';
+import { BookOpenText, Settings2, Sparkles, LayoutGrid } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const NAV_ITEMS = [
   { href: '/', label: '工作台', icon: Sparkles },
+  { href: '/template-gallery', label: '小红书模板库', icon: LayoutGrid },
+  { href: '/finished-six', label: '成品预览', icon: BookOpenText },
   { href: '/history', label: '历史记录', icon: BookOpenText },
   { href: '/settings', label: '设置', icon: Settings2 },
 ];

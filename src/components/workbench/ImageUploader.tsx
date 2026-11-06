@@ -12,19 +12,26 @@ interface ImageUploaderProps {
   images: ImageItem[];
   onChange: (images: ImageItem[]) => void;
   disabled?: boolean;
+  purpose?: 'reference' | 'layout';
+  onProcessingChange?: (processing: boolean) => void;
 }
 
 export function ImageUploader({
   images,
   onChange,
   disabled = false,
+  purpose = 'reference',
+  onProcessingChange,
 }: ImageUploaderProps) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const dropZoneRef = useRef<HTMLDivElement>(null);
   const dragDepth = useRef(0);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+
+  useEffect(() => { onProcessingChange?.(loading); }, [loading, onProcessingChange]);
 
   const showNotice = useCallback((message: string) => {
     setNotice(message);
@@ -38,10 +45,18 @@ export function ImageUploader({
     };
   }, []);
 
-  // 防止用户把文件拖到页面其他位置时，浏览器直接打开图片导致工作内容丢失
+  // 防止用户把文件拖到页面其他位置时，浏览器直接打开图片导致工作内容丢失；
+  // 同时对拖到上传区外的行为给出明确提示，避免误以为拖拽失效
   useEffect(() => {
     const preventNavOpen = (e: DragEvent) => {
-      if (e.dataTransfer?.types?.includes('Files')) e.preventDefault();
+      if (!e.dataTransfer?.types?.includes('Files')) return;
+      e.preventDefault();
+      if (e.type === 'drop') {
+        const zone = dropZoneRef.current;
+        if (zone && e.target instanceof Node && !zone.contains(e.target)) {
+          showNotice('请把图片拖到「上传参考图」区域内松开');
+        }
+      }
     };
     window.addEventListener('dragover', preventNavOpen);
     window.addEventListener('drop', preventNavOpen);
@@ -49,7 +64,7 @@ export function ImageUploader({
       window.removeEventListener('dragover', preventNavOpen);
       window.removeEventListener('drop', preventNavOpen);
     };
-  }, []);
+  }, [showNotice]);
 
   const addFiles = useCallback(
     async (files: FileList | File[]) => {
@@ -123,13 +138,17 @@ export function ImageUploader({
       showNotice(`最多 ${MAX_IMAGES} 张参考图，已达上限`);
       return;
     }
-    if (!e.dataTransfer.files || e.dataTransfer.files.length === 0) return;
+    if (!e.dataTransfer.files || e.dataTransfer.files.length === 0) {
+      showNotice('未能读取到图片文件：请从本地文件夹拖入，或点击上传按钮选择');
+      return;
+    }
     void addFiles(e.dataTransfer.files);
   };
 
   return (
     <div className="space-y-2">
       <div
+        ref={dropZoneRef}
         className={cn(
           'relative rounded-xl transition-colors duration-150',
           dragOver && 'bg-[#FFF0F2]',
@@ -231,8 +250,9 @@ export function ImageUploader({
       )}
 
       <p className="text-[11px] leading-relaxed text-[#9A948B]">
-        支持 1-10 张参考图，可点击上传或直接拖入上传区；图片仅用于本次 AI
-        分析，不会上传保存。
+        {purpose === 'layout'
+          ? '支持 1–10 张图表或照片，按原图完整排入内容页。图片仅在浏览器本地用于排版，不调用识别或生图模型。'
+          : '支持 1–10 张参考图，可点击上传或直接拖入上传区；图片用于本次 AI 分析，不会上传保存。若拖拽无反应，可点击上传按钮选择文件。'}
       </p>
 
       <input

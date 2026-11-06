@@ -3,6 +3,9 @@
 import { X } from 'lucide-react';
 import type { OptionDef } from '@/lib/options';
 import { cn } from '@/lib/utils';
+import { StudioCard } from './StudioCard';
+import { PaperNotebookCard } from './PaperNotebookCard';
+import { XhsNativeCard } from './XhsNativeCard';
 
 interface OptionGroupProps<T extends string> {
   label: string;
@@ -87,7 +90,10 @@ export function OptionGroup<T extends string>({
                 <span className="text-[11px] leading-snug text-[#6B655C]">
                   {option.desc}
                 </span>
-                {visual && option.visual && (
+                {visual && option.id.startsWith('xhs-native-') && <div aria-hidden style={{width:108,height:144,overflow:'hidden',alignSelf:'center',pointerEvents:'none'}}><div style={{transform:'scale(.1)',transformOrigin:'top left'}}><XhsNativeCard id={option.id} content={{kind:'cover',index:0,total:3,title:'看懂逻辑，再做判断',subtitle:'把值得收藏的重点，写进自己的学习笔记。',tags:['学习手记','干货分享']}} /></div></div>}
+                {visual && option.id.startsWith('studio-') && <div style={{width:108,height:144,overflow:'hidden',alignSelf:'center',pointerEvents:'none'}}><div style={{transform:'scale(.1)',transformOrigin:'top left'}}><StudioCard id={option.id} content={{kind:'cover',index:0,total:3,title:'看懂逻辑\n再做判断',subtitle:'用清晰的文字，记录每一个关键观点。'}} /></div></div>}
+                {visual && option.id === 'xhs-paper-notebook' && <div style={{width:108,height:144,overflow:'hidden',alignSelf:'center',pointerEvents:'none'}}><div style={{transform:'scale(.1)',transformOrigin:'top left'}}><PaperNotebookCard content={{kind:'cover',index:0,total:3,title:'看懂逻辑\n再做判断',subtitle:'把重点记下来'}} /></div></div>}
+                {visual && option.visual && !option.id.startsWith('xhs-native-') && !option.id.startsWith('studio-') && option.id !== 'xhs-paper-notebook' && (
                   <span
                     aria-hidden
                     className={cn(

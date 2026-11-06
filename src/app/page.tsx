@@ -3,14 +3,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, Brain, ChevronDown, Feather, FileUp, Loader2, PenLine, ScanText, Sparkles } from 'lucide-react';
 import { ImageUploader } from '@/components/workbench/ImageUploader';
-import { OptionGroup } from '@/components/workbench/OptionGroup';
 import { CustomizableSection } from '@/components/workbench/CustomizableSection';
 import { ResultPanel } from '@/components/workbench/ResultPanel';
 import { CardDeck } from '@/components/workbench/CardDeck';
 import { OriginalImageEditor } from '@/components/workbench/OriginalImageEditor';
+import { VIRAL_PRESETS, viralPrompt } from '@/lib/viral-presets';
 import { CustomTemplateUploader } from '@/components/workbench/CustomTemplateUploader';
 import type { ImageItem } from '@/lib/image-utils';
-import { getCardLayout, pickLayouts, type CardLayoutSpec } from '@/lib/layouts';
+import { getCardLayout, type CardLayoutSpec } from '@/lib/layouts';
+import { NATIVE_TEMPLATES } from '@/lib/xhs-native-layouts';
+import { BATCH_PREVIEW_SIZE, REWRITE_COUNTS, buildRewriteBatchContext, normalizeRewriteCount } from '@/lib/rewrite-batch';
 import type { CardDeckExportHandle } from '@/components/workbench/CardDeck';
 import {
   findOption,
@@ -32,35 +34,35 @@ import {
   loadCustomOptions,
   loadCustomPrompt,
   loadDeepThinking,
-  loadDeepseekBaseUrl,
-  loadDeepseekKey,
-  loadDeepseekModelId,
-  loadDeepseekVision,
   loadRefModelId,
   loadSettings,
   loadTextModelId,
   saveCustomOptions,
   saveCustomPrompt,
   saveDeepThinking,
-  saveDeepseekVision,
   saveHistoryItem,
   saveRefModelId,
   saveTextModelId,
+  updateHistoryResult,
 } from '@/lib/storage';
 import { parseRewriteResult, streamExtract, streamReference, streamRewrite } from '@/lib/stream-client';
 import {
   DEFAULT_TEXT_MODEL_ID,
   getTextModel,
-  isDeepseekModel,
   TEXT_MODELS,
 } from '@/lib/model';
-import { DEEPSEEK_PRESET, DEEPSEEK_PRESET_VISION } from '@/lib/deepseek-preset';
 
 type GenerateStatus = 'idle' | 'generating' | 'done' | 'error';
 
 const DEFAULT_STYLE = 'insight';
 const DEFAULT_STRUCTURE = 'good-share';
-const DEFAULT_LENGTH = 'follow';
+const DEFAULT_LENGTH = 'concise';
+const DEFAULT_BATCH_LAYOUTS: CardLayoutId[] = [0, 6, 12, 18, 24].map(index => NATIVE_TEMPLATES[index].id);
+
+/** 每套独立文案对应一个不同模板，优先保留用户已经选择的模板。 */
+function layoutsForCount(current: CardLayoutId[], count: number): CardLayoutId[] {
+  return [...new Set([...current, ...DEFAULT_BATCH_LAYOUTS, ...LAYOUT_OPTIONS.map(option => option.id)])].slice(0, count);
+}
 
 export default function WorkbenchPage() {
   const [images, setImages] = useState<ImageItem[]>([]);
@@ -70,54 +72,32 @@ export default function WorkbenchPage() {
   const [style, setStyle] = useState<string>(DEFAULT_STYLE);
   const [structure, setStructure] = useState<string>(DEFAULT_STRUCTURE);
   const [length, setLength] = useState<string>(DEFAULT_LENGTH);
-  /** 已选排版模板（多选，按选择顺序，最多 10 套） */
-  const [layouts, setLayouts] = useState<CardLayoutId[]>(['minimal']);
+  const [rewriteCount, setRewriteCount] = useState(5);
+  /** 当前任务的目标套数；修改下一次套数时，不改变已生成的结果。 */
+  const [batchCount, setBatchCount] = useState(5);
+  const [previewPage, setPreviewPage] = useState(0);
+  const previewStart = previewPage * BATCH_PREVIEW_SIZE;
+  const [layouts, setLayouts] = useState<CardLayoutId[]>(DEFAULT_BATCH_LAYOUTS);
   const [customLayouts, setCustomLayouts] = useState<CardLayoutSpec[]>([]);
   const handleCustomLayouts = useCallback((items: CardLayoutSpec[]) => {
     setCustomLayouts(items);
     setLayouts(prev => {
       const next = prev.filter(id => !id.startsWith('uploaded-') || items.some(item => item.id === id));
-      return next.length ? next : ['minimal'];
+      return layoutsForCount(next, prev.length);
     });
   }, []);
-  const useCustomLayout = useCallback((id: string) => setLayouts([id]), []);
+  const useCustomLayout = useCallback((id: string) => setLayouts(prev=>prev.includes(id) ? prev : [id,...prev.slice(1)]), []);
   /** 默认模板 = 第一套选中项（历史记录/兼容用） */
   const layout = layouts[0] ?? 'minimal';
   const templateCount = layouts.length;
-  const [layoutLimitHit, setLayoutLimitHit] = useState(false);
-
-  /** 多选：点一次加入，再点取消（至少保留 1 套，最多 10 套）。仅改选择，不触发页面重排/自动滚动 */
-  const toggleLayout = useCallback((id: CardLayoutId) => {
-    setLayouts((prev: CardLayoutId[]) => {
-      if (prev.includes(id)) {
-        if (prev.length === 1) return prev;
-        setLayoutLimitHit(false);
-        return prev.filter((item: CardLayoutId) => item !== id);
-      }
-      if (prev.length >= 10) {
-        setLayoutLimitHit(true);
-        return prev;
-      }
-      setLayoutLimitHit(false);
-      return [...prev, id];
-    });
-  }, []);
-
-  /** 套数快捷按钮：不足则按当前末位顺延补足，超出则截断。仅改选择，不触发页面重排/自动滚动 */
-  const setLayoutCount = useCallback((count: number) => {
-    setLayouts((prev: CardLayoutId[]) => {
-      if (prev.length >= count) return prev.slice(0, count);
-      const base = prev[prev.length - 1] ?? 'minimal';
-      const fill = pickLayouts(base, count - prev.length + 1).filter(
-        (spec: CardLayoutSpec) => !prev.includes(spec.id),
-      );
-      return [...prev, ...fill.map((spec: CardLayoutSpec) => spec.id)].slice(0, count);
-    });
-    setLayoutLimitHit(false);
-    setZipError(null);
-  }, []);
   /** 各套模板的导出句柄（批量 ZIP 下载用） */
+  const [versions, setVersions] = useState<RewriteResult[]>([]);
   const deckHandles = useRef<Map<string, CardDeckExportHandle>>(new Map());
+  const [exportDeck, setExportDeck] = useState<{ spec: CardLayoutSpec; result: RewriteResult } | null>(null);
+  const exportWaiter = useRef<((handle: CardDeckExportHandle) => void) | null>(null);
+  const registerExportDeck = useCallback((_key: string, handle: CardDeckExportHandle | null) => {
+    if (handle) exportWaiter.current?.(handle);
+  }, []);
   const [zipBusyKey, setZipBusyKey] = useState<string | null>(null);
   const [zipError, setZipError] = useState<string | null>(null);
   const registerDeck = useCallback((key: string, handle: CardDeckExportHandle | null) => {
@@ -137,15 +117,23 @@ export default function WorkbenchPage() {
       const notes: string[] = ['图文卡片导出说明', ''];
       let order = 0;
       for (const spec of specs) {
-        const handle = deckHandles.current.get(spec.id);
-        if (!handle) throw new Error('部分模板尚未准备好');
+        let handle = deckHandles.current.get(spec.id);
+        if (!handle) {
+          const version = versions[layouts.indexOf(spec.id)];
+          if (!version) throw new Error('这条文案尚未生成完成');
+          handle = await new Promise<CardDeckExportHandle>((resolve, reject) => {
+            const timeout = window.setTimeout(() => { exportWaiter.current = null; reject(new Error('模板准备超时，请重试')); }, 30000);
+            exportWaiter.current = ready => { window.clearTimeout(timeout); exportWaiter.current = null; resolve(ready); };
+            setExportDeck({ spec, result: version });
+          });
+        }
         order += 1;
         const folderName = `${String(order).padStart(2, '0')}_${safeName(spec.label)}`;
         const folder = rootFolder.folder(folderName);
         if (!folder) continue;
         const pages = await handle.exportPages();
         for (const page of pages) folder.file(page.fileName, page.blob);
-        folder.file('整组长图.png', await handle.exportStitched());
+        folder.file('整组长图.png', await handle.exportStitched(pages));
         notes.push(`${folderName}：${spec.desc}（共 ${pages.length} 张）`);
       }
       if (order === 0) {
@@ -165,15 +153,18 @@ export default function WorkbenchPage() {
     } catch {
       setZipError('打包下载失败，请重试');
     } finally {
+      exportWaiter.current = null;
+      setExportDeck(null);
       setZipBusyKey(null);
     }
-  }, []);
+  }, [versions, layouts]);
   const [customOptions, setCustomOptions] = useState<CustomOptionStores>({
     styles: [],
     structures: [],
     lengths: [],
   });
   const [customPrompt, setCustomPrompt] = useState('');
+  const [viralPreset, setViralPreset] = useState('');
   const [showCustomPrompt, setShowCustomPrompt] = useState(false);
   /** 深度思考模式：模型先推理再作答（速度变慢，质量更稳） */
   const [deepThinking, setDeepThinking] = useState(false);
@@ -181,6 +172,7 @@ export default function WorkbenchPage() {
   const [status, setStatus] = useState<GenerateStatus>('idle');
   const [streamText, setStreamText] = useState('');
   const [result, setResult] = useState<RewriteResult | null>(null);
+  const [generationNumber, setGenerationNumber] = useState(0);
   const [error, setError] = useState('');
   const [showCards, setShowCards] = useState(false);
   /** 图文卡片全局字号缩放（1 = 标准），用于调整文字占比 */
@@ -195,17 +187,9 @@ export default function WorkbenchPage() {
   useEffect(() => {
     setCardMode('original');
     setEditedOutputs({});
-  }, [images, result]);
+  }, [images, result?.body]);
   const [brandName, setBrandName] = useState('');
   const [textModelId, setTextModelId] = useState(DEFAULT_TEXT_MODEL_ID);
-  /** DeepSeek 自有 Key（仅 DeepSeek 模型需要，设置页配置） */
-  const [deepseekKey, setDeepseekKey] = useState('');
-  /** DeepSeek 兼容接口地址（空 = 官方默认） */
-  const [deepseekBaseUrl, setDeepseekBaseUrl] = useState('');
-  /** DeepSeek 通道模型 ID（空 = 默认 deepseek-chat） */
-  const [deepseekModelId, setDeepseekModelId] = useState('');
-  /** DeepSeek 通道模型是否支持读图（设置页声明） */
-  const [deepseekVision, setDeepseekVision] = useState(false);
   // 参考文案 AI 生成
   const [refGenerating, setRefGenerating] = useState(false);
   const [extracting, setExtracting] = useState(false);
@@ -222,30 +206,16 @@ export default function WorkbenchPage() {
   const [refFileMsg, setRefFileMsg] = useState('');
   /** 当前选中的文案模型（含读图能力标记） */
   const textModel = getTextModel(textModelId);
-  /** 选中 DeepSeek 但未配置 Key（服务端有预配置时不视为缺 Key） */
-  const deepseekNoKey =
-    isDeepseekModel(textModel) && !deepseekKey && !DEEPSEEK_PRESET;
-  /** 当前模型能否发送参考图（托管多模态，或 DeepSeek 通道声明读图） */
-  const canSendImages =
-    textModel.supportsImage ||
-    (isDeepseekModel(textModel) && (deepseekVision || DEEPSEEK_PRESET_VISION));
+  /** 当前模型能否发送参考图（托管多模态标记） */
+  const canSendImages = textModel.supportsImage;
   /** 参考文案生成所用模型（独立于仿写模型） */
   const refModel = getTextModel(refModelId);
   /** 参考模型能否发送参考图 */
-  const refCanSendImages =
-    refModel.supportsImage ||
-    (isDeepseekModel(refModel) && (deepseekVision || DEEPSEEK_PRESET_VISION));
-  /** 参考模型选 DeepSeek 但未配置 Key */
-  const refNoKey =
-    isDeepseekModel(refModel) && !deepseekKey && !DEEPSEEK_PRESET;
+  const refCanSendImages = refModel.supportsImage;
 
   useEffect(() => {
     setBrandName(loadSettings().brandName);
     setTextModelId(loadTextModelId());
-    setDeepseekKey(loadDeepseekKey());
-    setDeepseekBaseUrl(loadDeepseekBaseUrl());
-    setDeepseekModelId(loadDeepseekModelId());
-    setDeepseekVision(loadDeepseekVision());
     setRefModelId(loadRefModelId());
     const storedPrompt = loadCustomPrompt();
     setCustomPrompt(storedPrompt);
@@ -318,8 +288,8 @@ export default function WorkbenchPage() {
 
   const canGenerate =
     status !== 'generating' &&
+    zipBusyKey === null &&
     !refGenerating &&
-    !deepseekNoKey &&
     (referenceText.trim().length > 0 || images.length > 0);
 
   /** AI 自动生成参考文案：按主题（或已上传参考图）流式写入输入框；使用独立的参考模型 */
@@ -353,10 +323,6 @@ export default function WorkbenchPage() {
       setRefError('请输入创作主题，或先上传参考图');
       return;
     }
-    if (refNoKey) {
-      setRefError('参考生成模型选了 DeepSeek：请先在「设置」页填写 API Key，或切换其他模型');
-      return;
-    }
     if (images.length > 0 && !refCanSendImages && !trimmed) {
       setRefError('参考生成模型不支持读图，请输入主题或切换支持读图的模型');
       return;
@@ -370,14 +336,6 @@ export default function WorkbenchPage() {
           topic: trimmed,
           images: refCanSendImages ? images.map((img) => img.dataUrl) : [],
           modelId: refModel.id,
-          deepseekKey: isDeepseekModel(refModel) ? deepseekKey : undefined,
-          deepseekBaseUrl: isDeepseekModel(refModel)
-            ? deepseekBaseUrl
-            : undefined,
-          deepseekModelId: isDeepseekModel(refModel)
-            ? deepseekModelId
-            : undefined,
-          deepseekVision: isDeepseekModel(refModel) ? deepseekVision : undefined,
         },
         setReferenceText,
       );
@@ -408,14 +366,6 @@ export default function WorkbenchPage() {
         {
           images: images.map((img) => img.dataUrl),
           modelId: refModel.id,
-          deepseekKey: isDeepseekModel(refModel) ? deepseekKey : undefined,
-          deepseekBaseUrl: isDeepseekModel(refModel)
-            ? deepseekBaseUrl
-            : undefined,
-          deepseekModelId: isDeepseekModel(refModel)
-            ? deepseekModelId
-            : undefined,
-          deepseekVision: isDeepseekModel(refModel) ? deepseekVision : undefined,
         },
         (text) => setReferenceText(text),
       );
@@ -428,9 +378,14 @@ export default function WorkbenchPage() {
 
   const handleGenerate = async () => {
     if (!canGenerate) return;
+    const requestedCount = normalizeRewriteCount(rewriteCount);
+    setPreviewPage(0);
+    setBatchCount(requestedCount);
+    setGenerationNumber(0);
+    setLayouts(current => layoutsForCount(current, requestedCount));
     setStatus('generating');
     setStreamText('');
-    setResult(null);
+    setResult(null); setVersions([]);
     setError('');
     setShowCards(false);
 
@@ -450,9 +405,13 @@ export default function WorkbenchPage() {
     const lengthLabel = customLength?.label ?? findOption(LENGTH_OPTIONS, lengthId).label;
 
     try {
+      const generated: RewriteResult[] = [];
+      for(let version=0;version<requestedCount;version++){
+      setGenerationNumber(version+1);setStreamText('');
       const fullText = await streamRewrite(
         {
-          images: canSendImages ? images.map((img) => img.dataUrl) : [],
+          // Extracted/manual reference text is authoritative; originals stay local for card rendering.
+          images: canSendImages && !referenceText.trim() ? images.map((img) => img.dataUrl) : [],
           referenceText,
           style: styleId,
           structure: structureId,
@@ -461,14 +420,7 @@ export default function WorkbenchPage() {
           customStructure,
           customLength,
           modelId: textModel.id,
-          deepseekKey: isDeepseekModel(textModel) ? deepseekKey : undefined,
-          deepseekBaseUrl: isDeepseekModel(textModel)
-            ? deepseekBaseUrl
-            : undefined,
-          deepseekModelId: isDeepseekModel(textModel)
-            ? deepseekModelId
-            : undefined,
-          deepseekVision: isDeepseekModel(textModel) ? deepseekVision : undefined,
+          batchContext: buildRewriteBatchContext(version, requestedCount, generated, viralPrompt(viralPreset)),
           customPrompt: customPrompt.trim() || undefined,
           deepThinking,
           settings: loadSettings(),
@@ -476,8 +428,8 @@ export default function WorkbenchPage() {
         setStreamText,
       );
       const parsed = parseRewriteResult(fullText);
-      setResult(parsed);
-      setStatus('done');
+      if(!parsed.body?.trim() || generated.some(v=>v.body.replace(/\s/g,'')===parsed.body.replace(/\s/g,''))) throw new Error('返回文案为空或重复，请重试');
+      generated.push(parsed);setVersions([...generated]);
 
       const historyItem: HistoryItem = {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -497,6 +449,8 @@ export default function WorkbenchPage() {
         result: parsed,
       };
       saveHistoryItem(historyItem);
+      }
+      setResult(generated[0]);setStatus('done');
     } catch (e) {
       setError(e instanceof Error ? e.message : '生成失败，请稍后重试');
       setStatus('error');
@@ -504,11 +458,21 @@ export default function WorkbenchPage() {
   };
 
   const handleGenerateCards = () => {
-    if (!result) return;
+    if (versions.length !== batchCount) return;
     setShowCards(true);
     window.requestAnimationFrame(() => {
       cardsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
+  };
+
+  const handleTitleChange = (titleIndex: number, title: string) => {
+    if (!result || zipBusyKey !== null || !title.trim()) return;
+    const versionIndex = versions.indexOf(result);
+    if (versionIndex < 0 || titleIndex < 0 || titleIndex >= result.titles.length) return;
+    const updated = { ...result, titles: result.titles.map((current, index) => index === titleIndex ? title.trim() : current) };
+    setVersions(current => current.map((version, index) => index === versionIndex ? updated : version));
+    setResult(updated);
+    updateHistoryResult(result, updated);
   };
 
   return (
@@ -661,6 +625,15 @@ export default function WorkbenchPage() {
                 </div>
               )}
 
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <label htmlFor="extract-model" className="text-[12px] font-bold text-[#6B655C]">识别模型</label>
+                <select id="extract-model" value={refModelId} onChange={e => {
+                  setRefModelId(e.target.value); saveRefModelId(e.target.value); setRefError('');
+                }} disabled={extracting || refGenerating || status === 'generating'} className="min-w-0 flex-1 rounded-lg border border-[rgba(26,24,20,0.14)] bg-white px-2.5 py-2 text-[12px]" title="用于提取图片文字及生成参考文案，独立于下方仿写模型">
+                  {TEXT_MODELS.filter(m=>m.supportsImage).map(m=><option key={m.id} value={m.id}>{m.label}</option>)}
+                </select>
+                <span className="text-[11px] text-[#9A948B]">仅列出支持读图的模型，与仿写模型独立</span>
+              </div>
               {refError && (
                 <p className="flex items-start gap-1.5 rounded-lg bg-[#FFF0F2] px-2.5 py-2 text-[11px] font-medium leading-relaxed text-[#E01335]">
                   <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden />
@@ -697,6 +670,17 @@ export default function WorkbenchPage() {
               )}
             </div>
 
+            <div className="rounded-xl border border-black/10 bg-white p-4 space-y-2">
+              <label className="block text-sm font-bold" htmlFor="viral-preset">图文策划预设</label>
+              <select id="viral-preset" className="w-full rounded-lg border p-2 text-sm" value={viralPreset} onChange={e => {
+                setViralPreset(e.target.value);
+                const preset = VIRAL_PRESETS.find(item => item.id === e.target.value);
+                if (preset) { setStructure(preset.structure); }
+              }}><option value="">不使用预设，按下方设置</option>{VIRAL_PRESETS.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select>
+              <p className="text-xs text-[#6B655C]">选择后推荐对应结构与模板，仍可自行调整；下一次生成时生效。</p>
+              {viralPreset && <p className="text-xs leading-relaxed">{VIRAL_PRESETS.find(item => item.id === viralPreset)?.brief}</p>}
+              <a className="text-xs underline text-[#6B655C]" href="https://github.com/JimLiu/baoyu-skills/tree/main/skills/baoyu-xhs-images" target="_blank" rel="noreferrer">策划方法参考：baoyu-xhs-images（MIT）。本功能使用网站现有排版引擎。</a>
+            </div>
             <CustomizableSection
               label="仿写风格"
               kindName="风格"
@@ -743,9 +727,7 @@ export default function WorkbenchPage() {
               >
                 文案模型
                 <span className="ml-1.5 text-[11px] font-normal text-[#9A948B]">
-                  {deepseekNoKey
-                    ? '已选 DeepSeek：请先到「设置」页填写 API Key'
-                    : '展示名与实际调用一致，可自行切换'}
+                  {process.env.NEXT_PUBLIC_AI_TEST_PROVIDER === 'relay' ? '本次测试使用已授权的兼容接口' : '扣子托管通道'}
                 </span>
               </label>
               <select
@@ -829,37 +811,31 @@ export default function WorkbenchPage() {
                 <p className="flex items-start gap-1.5 rounded-lg bg-[#FFF7E6] px-2.5 py-2 text-[11px] font-medium leading-relaxed text-[#8C6D1F]">
                   <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden />
                   <span className="flex-1">
-                    {isDeepseekModel(textModel) ? (
-                      <>
-                        已选 DeepSeek 但未开启读图，{images.length} 张参考图将被忽略；若你的模型支持多模态，可
-                        <button
-                          type="button"
-                          onClick={() => {
-                            saveDeepseekVision(true);
-                            setDeepseekVision(true);
-                          }}
-                          className="mx-1 inline-flex items-center rounded-md border border-[#8C6D1F]/40 bg-white/80 px-1.5 py-0.5 font-bold text-[#8C6D1F] transition-colors duration-150 hover:border-[#8C6D1F] hover:bg-white"
-                        >
-                          立即开启读图
-                        </button>
-                        （一次即可，设置页可随时关闭）
-                      </>
-                    ) : (
-                      <>
-                        当前模型不支持图片输入，{images.length} 张参考图将被忽略；如需读图请切换支持读图的模型
-                      </>
-                    )}
+                    当前模型不支持图片输入，{images.length} 张参考图将被忽略；如需读图请切换支持读图的模型
                   </span>
                 </p>
               )}
             </div>
 
+            <div className="space-y-2">
+              <label htmlFor="rewrite-count" className="block text-[13px] font-bold text-[#1A1814]">仿写数量</label>
+              <select
+                id="rewrite-count"
+                value={rewriteCount}
+                disabled={status === 'generating'}
+                onChange={event => setRewriteCount(normalizeRewriteCount(Number(event.target.value)))}
+                aria-describedby="rewrite-count-hint"
+                className="w-full rounded-xl border border-[rgba(26,24,20,0.14)] bg-[#FAF7F1] px-3.5 py-2.5 text-[13px] font-medium text-[#1A1814] outline-none focus:border-[#FF2E4D] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {REWRITE_COUNTS.map(count => <option key={count} value={count}>{count} 条</option>)}
+              </select>
+              <p id="rewrite-count-hint" className="text-[11px] leading-relaxed text-[#9A948B]">可选 1–100 条，按顺序逐条独立仿写，完成后分别搭配不同模板。数量越多，生成时间越长。</p>
+            </div>
             <div className="space-y-2 pt-1">
               <button
                 type="button"
                 onClick={() => void handleGenerate()}
                 disabled={!canGenerate}
-                title={deepseekNoKey ? '请先在「设置」页填写 DeepSeek API Key' : undefined}
                 className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#FF2E4D] px-5 py-3.5 text-[15px] font-bold text-white transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#E01335] hover:shadow-[0_8px_20px_rgba(255,46,77,0.3)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none"
               >
                 {status === 'generating' ? (
@@ -867,13 +843,11 @@ export default function WorkbenchPage() {
                 ) : (
                   <Sparkles className="h-5 w-5" aria-hidden />
                 )}
-                {status === 'generating' ? 'AI 仿写中…' : '生成仿写文案'}
+                {status === 'generating' ? `正在仿写 ${generationNumber} / ${batchCount} 条…` : `仿写 ${rewriteCount} 条独立文案`}
               </button>
               {!canGenerate && status !== 'generating' && (
                 <p className="text-center text-[11px] text-[#9A948B]">
-                  {deepseekNoKey
-                    ? '请先在「设置」页配置 DeepSeek API Key 后再生成'
-                    : '填写参考文案或上传参考图后即可生成'}
+                  填写参考文案或上传参考图后即可生成
                 </p>
               )}
               <p
@@ -881,7 +855,6 @@ export default function WorkbenchPage() {
                 title={`当前文案模型：${textModel.label}（${textModel.id}）`}
               >
                 当前文案模型：{textModel.label}
-                {deepseekNoKey ? '（待配置 Key）' : ''}
               </p>
             </div>
           </div>
@@ -922,82 +895,27 @@ export default function WorkbenchPage() {
             </section>
           )}
 
+          {status === 'generating' && <p role="status">正在仿写第 {generationNumber} / {batchCount} 条，完成后再排版。</p>}
           {status === 'done' && result && (
             <>
+<div className="bg-white p-4 rounded-xl"><h2>第一步：检查 {versions.length} 条仿写文案，再选择排版</h2>{versions.map((_,i)=><button key={i} type="button" className="border rounded p-2 m-1" onClick={()=>setResult(versions[i])}>文案 {i+1}</button>)}</div>
               <ResultPanel
+                key={versions.indexOf(result)}
                 result={result}
                 onGenerateCards={handleGenerateCards}
+                onTitleChange={handleTitleChange}
+                titleEditingDisabled={zipBusyKey !== null}
               />
               {showCards && (
                 <div ref={cardsRef} className="scroll-mt-24">
-                  {images.length > 0 && (
-                    <div className="mt-5 flex flex-wrap items-center gap-2 rounded-xl border border-[rgba(26,24,20,0.08)] bg-white px-3 py-2.5">
-                      <span className="text-[12px] font-bold text-[#1A1814]">制作步骤：先换字，再套模板</span>
-                      <button
-                        type="button"
-                        onClick={() => setCardMode('original')}
-                        className={`rounded-full border px-3 py-1.5 text-[12px] font-bold transition-colors duration-150 ${cardMode === 'original' ? 'border-[#FF2E4D] bg-[#FFF1F3] text-[#E01335]' : 'border-[rgba(26,24,20,0.14)] text-[#6B655C] hover:border-[#1A1814]'}`}
-                      >
-                        第一步：原图换字
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setCardMode('template')}
-                        disabled={Object.keys(editedOutputs).length !== images.length}
-                        title={Object.keys(editedOutputs).length !== images.length ? '请先完成全部图片换字，并逐张检查' : '确认所有图片无误后进入排版'}
-                        className={`rounded-full border px-3 py-1.5 text-[12px] font-bold transition-colors duration-150 ${cardMode === 'template' ? 'border-[#FF2E4D] bg-[#FFF1F3] text-[#E01335]' : 'border-[rgba(26,24,20,0.14)] text-[#6B655C] hover:border-[#1A1814]'}`}
-                      >
-                        确认第一步无误，进入排版（{Object.keys(editedOutputs).length}/{images.length}）
-                      </button>
-                    </div>
-                  )}
-                  {images.length > 0 && (
-                    <div hidden={cardMode !== 'original'}>
-                      <OriginalImageEditor key={images.map((img: ImageItem) => img.id).join(',') + result.body} images={images} body={result.body} onOutputs={handleEditedOutputs} />
-                    </div>
-                  )}
-                  {images.length > 0 && cardMode === 'template' && Object.keys(editedOutputs).length !== images.length && <p className="my-4 rounded-xl bg-white p-4 text-sm">请先完成第一步的全部图片换字（{Object.keys(editedOutputs).length}/{images.length}），检查所有图片无误后，点击确认按钮进入排版。</p>}
-                  {(images.length === 0 || (cardMode === 'template' && Object.keys(editedOutputs).length === images.length)) && (
+                  {versions.length === batchCount && (
                   <>
 <div className="space-y-4 rounded-2xl bg-white p-5 mb-5">
             <CustomTemplateUploader onChange={handleCustomLayouts} onSelect={useCustomLayout} />
-            <OptionGroup
-              label="第二步：选择排版模板（可多选）"
-              options={[...customLayouts.map(item => ({ id: item.id, label: item.label, desc: item.desc })), ...LAYOUT_OPTIONS]}
-              value={layout}
-              onChange={toggleLayout}
-              selectedIds={layouts}
-              onToggle={toggleLayout}
-              visual
-              dense
-              disabled={false}
-            />
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[12px] font-medium text-[#6B655C]">快捷套数</span>
-              {[1, 2, 4, 6, 8, 10].map((count: number) => (
-                <button
-                  key={count}
-                  type="button"
-                  onClick={() => setLayoutCount(count)}
-                  className={`rounded-full border px-3 py-1 text-[12px] font-bold transition-colors duration-150 ${templateCount === count ? 'border-[#1A1814] bg-[#1A1814] text-[#FAF7F1]' : 'border-[rgba(26,24,20,0.14)] text-[#6B655C] hover:border-[#1A1814] hover:text-[#1A1814]'}`}
-                >
-                  {`${count} 套`}
-                </button>
-              ))}
-              <span className="ml-1 inline-flex items-center gap-1.5 rounded-full bg-[#FF2E4D] px-3 py-1 text-[12px] font-bold text-white shadow-[0_2px_8px_rgba(255,46,77,0.28)]">
-                <span className="text-[13px] font-black">{LAYOUT_OPTIONS.length}</span>
-                <span>套专业排版模板</span>
-              </span>
-            </div>
-            <p className="text-[11px] leading-relaxed text-[#6B655C]">
-              {`已选 ${layouts.length} 套${layouts.length > 1 ? `（${layouts.map((id: string) => customLayouts.find(item => item.id === id)?.label ?? LAYOUT_OPTIONS.find((opt) => opt.id === id)?.label ?? id).join('、')}）` : ''}，点模板可增删，最多 10 套`}
-              {layoutLimitHit ? ' · 已达 10 套上限' : ''}
-            </p>
-            {images.length > 0 && (
-              <p className="text-[11px] leading-relaxed text-[#9A948B]">
-                已确认第一步结果。现在选择字体与版式；如需重新修改，请返回第一步，修改后重新确认。
-              </p>
-            )}
+<h3 className="font-bold">第二步：{versions.length} 条文案分别搭配 {versions.length} 种模板</h3>
+{versions.slice(previewStart, previewStart + BATCH_PREVIEW_SIZE).map((_,offset)=>{const index=previewStart+offset;return <label key={index} className="flex gap-3">文案 {index+1}<select disabled={zipBusyKey !== null} aria-label={'文案 '+(index+1)+' 的模板'} value={layouts[index]} onChange={event=>{const next=[...layouts];const existing=next.indexOf(event.target.value);if(existing>=0)next[existing]=next[index];next[index]=event.target.value;setLayouts(next);}}>{[...customLayouts,...LAYOUT_OPTIONS].map(o=><option key={o.id} value={o.id}>{o.label}</option>)}</select></label>;})}
+<p>{versions.length} 条独立文案各配一种模板，已用模板会交换位置。</p>
+{versions.length > BATCH_PREVIEW_SIZE && <div className="flex flex-wrap items-center gap-3"><button type="button" disabled={previewPage === 0 || zipBusyKey !== null} onClick={()=>setPreviewPage(page=>page-1)} className="rounded border px-3 py-1 disabled:opacity-40">上一批</button><span>查看第 {previewStart+1}–{Math.min(previewStart+BATCH_PREVIEW_SIZE,versions.length)} 条 / 共 {versions.length} 条</span><button type="button" disabled={previewStart+BATCH_PREVIEW_SIZE>=versions.length || zipBusyKey !== null} onClick={()=>setPreviewPage(page=>page+1)} className="rounded border px-3 py-1 disabled:opacity-40">下一批</button><p className="w-full text-xs text-[#9A948B]">每批预览 10 条，打包下载仍包含全部文案对应的模板。</p></div>}
 </div>
                   <div className="mb-3 flex flex-wrap items-center gap-2">
                     <button
@@ -1031,6 +949,7 @@ export default function WorkbenchPage() {
                         <button
                           key={item.value}
                           type="button"
+                          disabled={zipBusyKey !== null}
                           onClick={() => setCardFontScale(item.value)}
                           className={`px-2.5 py-1 text-[11px] font-medium transition-colors duration-150 ${
                             Math.abs(cardFontScale - item.value) < 0.001
@@ -1043,7 +962,7 @@ export default function WorkbenchPage() {
                       ))}
                     </div>
                   </div>
-                  {layouts.map((id: CardLayoutId) => getCardLayout(id)).map((spec, deckIndex) => (
+                  {layouts.slice(previewStart, previewStart + BATCH_PREVIEW_SIZE).map((id: CardLayoutId) => getCardLayout(id)).map((spec, offset) => {const deckIndex=previewStart+offset;return (
                     <div key={spec.id} className={deckIndex > 0 ? 'mt-6 border-t border-[rgba(26,24,20,0.08)] pt-6' : undefined}>
                       {templateCount > 1 && (
                         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -1063,7 +982,7 @@ export default function WorkbenchPage() {
                         </div>
                       )}
                       <CardDeck
-                        result={result}
+                        result={versions[deckIndex]}
                         referenceImages={referenceImages}
                         referenceFullImages={referenceFullImages}
                         layout={spec.id}
@@ -1071,10 +990,9 @@ export default function WorkbenchPage() {
                         deckKey={spec.id}
                         registerDeck={registerDeck}
                         fontScale={cardFontScale}
-                        editedPages={images.length > 0 ? images.map((_: ImageItem, i: number) => editedOutputs[i]).filter((v): v is string => !!v) : undefined}
                       />
                     </div>
-                  ))}
+                  );})}
                   </>
                   )}
                 </div>
@@ -1083,6 +1001,7 @@ export default function WorkbenchPage() {
           )}
         </div>
       </div>
+      {exportDeck && <div aria-hidden="true" style={{position:'fixed',left:-60000,top:0,width:1080,pointerEvents:'none'}}><CardDeck key={exportDeck.spec.id} result={exportDeck.result} referenceImages={referenceImages} referenceFullImages={referenceFullImages} layout={exportDeck.spec.id} brandName={brandName} deckKey={exportDeck.spec.id} registerDeck={registerExportDeck} fontScale={cardFontScale} /></div>}
     </div>
   );
 }

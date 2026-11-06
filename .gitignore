@@ -164,7 +164,14 @@ Desktop.ini
 .coze-logs
 .codegraph/
 
-.env*
-!.env.example
-.coze/
-assets/
+test-artifacts/
+
+.next-deploy-check/
+dist-deploy-check/
+
+# Service credentials stay outside the public handoff.
+.env.*
+!.env.relay.example
+!.env.coze.example
+release-work/
+releases/

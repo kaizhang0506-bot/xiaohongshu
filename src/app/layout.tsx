@@ -1,9 +1,10 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
+import './card-fonts.css';
 import './rednote-templates.css';
 import { AppHeader } from '@/components/AppHeader';
 import { DisclaimerBar } from '@/components/DisclaimerBar';
-import { IMAGE_MODELS, TEXT_MODELS } from '@/lib/model';
+import { TEXT_MODELS } from '@/lib/model';
 
 export const metadata: Metadata = {
   title: {
@@ -45,8 +46,7 @@ export default function RootLayout({
           <main className="flex-1">{children}</main>
           <footer className="border-t border-[rgba(26,24,20,0.08)] py-5">
             <p className="mx-auto max-w-6xl px-4 text-center text-[12px] leading-relaxed text-[#9A948B] sm:px-6">
-              AI 引擎：文案模型 {TEXT_MODELS.length} 款、配图模型{' '}
-              {IMAGE_MODELS.length} 款，均可在页面内自选（展示名与实际调用一致）
+              文案仿写可选 {TEXT_MODELS.length} 款模型；模板直接排版，无需生图模型。
               <br className="sm:hidden" />
               <span className="mx-1.5 hidden sm:inline" aria-hidden>
                 ·

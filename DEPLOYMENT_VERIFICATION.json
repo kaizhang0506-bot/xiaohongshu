@@ -1,0 +1,114 @@
+{
+  "release": "2026-11-06-coze-handoff",
+  "verifiedDateAsiaShanghai": "2026-11-06",
+  "node": "v24.21.0",
+  "scope": "local isolated production server; not Coze cloud",
+  "provider": "relay",
+  "checks": {
+    "nextProductionBuildWithWebpackAndTypeScript": "passed",
+    "serverBundleTsup": "passed",
+    "fullEslint": "passed",
+    "stylelint": "passed",
+    "deploymentGuardUnitTests": "passed",
+    "sourceIntegrity": "passed",
+    "rewrite100AndZipMapping": "passed with local mocks; no model calls",
+    "rewriteFactsRetryAndSseReset": "passed with local mocks",
+    "relayEmptyResponse": "passed with local mocks",
+    "nativeCardTypography100": "passed",
+    "buildRuntimeProviderConsistency": "passed"
+  },
+  "contract": {
+    "nativeTemplates": 100,
+    "registeredTemplates": 322,
+    "localFontAssets": 319,
+    "normalFlowRequiresImageGeneration": false,
+    "legacyImageApiEnabled": false
+  },
+  "http": [
+    {
+      "method": "GET",
+      "path": "/",
+      "status": 200,
+      "nonempty": true
+    },
+    {
+      "method": "GET",
+      "path": "/template-gallery",
+      "status": 200,
+      "nonempty": true
+    },
+    {
+      "method": "GET",
+      "path": "/finished-six",
+      "status": 200,
+      "nonempty": true
+    },
+    {
+      "method": "GET",
+      "path": "/history",
+      "status": 200,
+      "nonempty": true
+    },
+    {
+      "method": "GET",
+      "path": "/settings",
+      "status": 200,
+      "nonempty": true
+    },
+    {
+      "method": "GET",
+      "path": "/finished-six/chart-1.png",
+      "status": 200,
+      "nonempty": true
+    },
+    {
+      "method": "GET",
+      "path": "/finished-six/cover.png",
+      "status": 200,
+      "nonempty": true
+    },
+    {
+      "method": "GET",
+      "path": "/fonts/lxgw-wenkai-tc-0.woff2",
+      "status": 200,
+      "nonempty": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/rewrite",
+      "status": 400,
+      "upstreamModelCalled": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/extract",
+      "status": 400,
+      "upstreamModelCalled": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/reference",
+      "status": 400,
+      "upstreamModelCalled": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/smart-edit",
+      "status": 400,
+      "upstreamModelCalled": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/illustrate",
+      "status": 410,
+      "upstreamModelCalled": false
+    }
+  ],
+  "notVerified": [
+    "Coze cloud deployment, credentials and assigned domain",
+    "Live model invocation during this packaging run",
+    "100 live model requests",
+    "All candidate models in either provider account"
+  ],
+  "credentials": "No real keys included in public repository or archive. Set CONFLUX_API_KEY in target server secret configuration."
+}

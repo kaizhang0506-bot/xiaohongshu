@@ -1,0 +1,29 @@
+{
+  "version": "2026-11-06",
+  "project": "xiaohongshu",
+  "defaultDeploymentProvider": "relay",
+  "explicitProviderConfigurationRequired": true,
+  "nativeTemplates": 100,
+  "registeredTemplates": 322,
+  "localFontAssets": 319,
+  "cardSize": [1080, 1440],
+  "rewriteRange": [1, 100],
+  "normalFlowUsesImageGeneration": false,
+  "legacyImageGenerationEnabledByDefault": false,
+  "aiFunctions": {
+    "rewrite": "/api/rewrite",
+    "extract": "/api/extract",
+    "reference": "/api/reference",
+    "smartEdit": "/api/smart-edit"
+  },
+  "invariants": [
+    "一套素材先生成多条独立文案，再分别使用不同模板",
+    "模板、字体、装饰、图片合成和导出不调用生图模型",
+    "封面只有上半大标题和下半完整大图，不加摘要和底部小字",
+    "正文首句不自动变标题；小标题为正文1.12倍，次级标题1.08倍",
+    "图表和照片完整保留，不重绘、不拉伸、不嵌入纯文字截图",
+    "标题修改同步对应文案、封面、历史与导出",
+    "ZIP按不同文案和模板建立独立子文件夹",
+    "既有模板ID和本地字体不可因部署被删除或改为AI生成"
+  ]
+}

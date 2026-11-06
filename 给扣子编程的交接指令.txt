@@ -1,0 +1,16 @@
+请部署并接手这个已有「小红书图文创作工作台」，不要重建、重新设计、切换模型或重做模板。先读 AGENTS.md、《扣子部署与模型接入说明.md》和 deployment-contract.json。
+
+当前通道固定按本次交接方案配置：AI_TEST_PROVIDER=relay、NEXT_PUBLIC_AI_TEST_PROVIDER=relay、CONFLUX_BASE_URL=https://oapi.kaitools.cn/v1、CONFLUX_REWRITE_MODEL=deepseek-v4.1-flash-1017；CONFLUX_API_KEY 在扣子服务端密钥配置中填现有 Key，不能放前端或公开仓库。AI_DEBUG_SAVE_RESULTS=0、ENABLE_LEGACY_AI_IMAGES=0。
+
+四项 AI 功能：仿写、图片提字、AI 起草参考文案、智能换字识别，通过 src/lib/text-client.ts 调用现有中转站。扣子文字 SDK 是用户以后明确要求时才能启用的备选；不能因为网站部署到扣子服务器，就改成豆包模型。编程助手模型不会自动成为网站 API。
+
+新增 100 套模板（20 风格×5 构图）、原有模板（注册表合计322）、319份本地字体、图片合成与 PNG/长图/ZIP 下载全部由网站代码完成，不需要任何生图模型。历史 AI 封面已保存为 public/finished-six 静态素材，直接使用，不重新调用 Codex 或扣子生图。遗留 /api/illustrate 默认关闭，正常前端不调用。
+
+必须保留：一套素材→用户选1–100条→逐条独立仿写→用户核对→各配不同模板→原图完整保留→按模板分子文件夹下载。不能复制一篇文案反复套模板。
+封面只放上半大标题与下半完整大图，摘要/正文从第二页开始。普通正文首句不生成页标题；真正小标题只大12%，次级小标题只大8%，重点只加粗不放大。同页正文一致，不能重绘/拉伸图表或把纯文字截图嵌入。标题可修改并同步对应版本、封面、历史和下载。每批预览10条，下载包含全部对应结果。
+
+Node.js24、pnpm9；保留完整 src/public/scripts/references 和字体许可。按 .env.relay.example 配置服务端变量，运行 pnpm install --frozen-lockfile、node scripts/check-deployment.mjs source、pnpm build、pnpm start。项目是完整 Next.js+Node.js 服务，不是静态页面，不依赖开发机本地路径。
+
+完整性基线 release-integrity.json 不得在部署时自动重建；模型通道、文件或字体校验失败时修配置或恢复原文件，不要删检查器来通过。只有用户授权功能改动、完成验证后才能生成新发布基线。
+
+先验本地套模板、字号/原图/放大/PNG/ZIP，再验提字、1条/2条独立仿写与智能换字，重启后复测。报告实际 provider、模型ID、构建/启动、逐项验收及待验证部分；不要输出密钥。没有扣子云端实测不能写云端已跑通。不要增加后台队列、账号数据库、自动发布或改变现有流程。

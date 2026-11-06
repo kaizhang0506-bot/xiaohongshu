@@ -6,7 +6,7 @@
  * 稳定性兜底：中转站偶发 "upstream failed to respond" / 网关 5xx / 网络断开时，
  * 在「尚未输出任何正文」的前提下自动重试一次，且重试时关闭思考模式（思考链最易触发上游失败）。
  */
-import { DEEPSEEK_API_URL } from './model';
+const DEEPSEEK_API_URL = 'https://api.deepseek.com/chat/completions';
 import type { StreamEvent } from './types';
 
 /** OpenAI 兼容多模态内容分片 */
@@ -124,6 +124,18 @@ async function runAttempt(
   const decoder = new TextDecoder();
   let buffer = '';
   let streamError = '';
+  const acceptLine = (line: string) => {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('data:')) return;
+    const payload = trimmed.slice(5).trim();
+    if (!payload || payload === '[DONE]') return;
+    try {
+      const json = JSON.parse(payload) as { choices?: Array<{ delta?: { content?: string } }>; error?: { message?: string } };
+      if (json.error?.message) streamError = json.error.message;
+      const text = json.choices?.[0]?.delta?.content;
+      if (text) { emitted = true; safeEnqueue({ type: 'delta', text }); }
+    } catch { /* Ignore heartbeat or non-JSON lines. */ }
+  };
 
   try {
     for (;;) {
@@ -132,27 +144,10 @@ async function runAttempt(
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n');
       buffer = lines.pop() ?? '';
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith('data:')) continue;
-        const payload = trimmed.slice(5).trim();
-        if (!payload || payload === '[DONE]') continue;
-        try {
-          const json = JSON.parse(payload) as {
-            choices?: Array<{ delta?: { content?: string } }>;
-            error?: { message?: string };
-          };
-          if (json.error?.message) streamError = json.error.message;
-          const text = json.choices?.[0]?.delta?.content;
-          if (text) {
-            emitted = true;
-            safeEnqueue({ type: 'delta', text });
-          }
-        } catch {
-          // 跳过无法解析的心跳或分片
-        }
-      }
+      for (const line of lines) acceptLine(line);
     }
+    // Some compatible gateways finish without a final newline.
+    if (buffer.trim()) acceptLine(buffer);
   } catch {
     // 流中断（网关断开 / 超时）
     return {
@@ -171,6 +166,7 @@ async function runAttempt(
       message: describeErrorBody(streamError, 502),
     };
   }
+  if (!emitted) return { finished: false, emitted: false, retryable: true, message: '模型返回了空内容，请重试' };
   return { finished: true, emitted, retryable: false, message: '' };
 }
 

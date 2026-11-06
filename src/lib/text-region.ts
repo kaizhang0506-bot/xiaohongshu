@@ -1,8 +1,35 @@
 type Rect = { x: number; y: number; width: number; height: number };
 
+/** Snap approximate model boxes to actual ink groups, then coalesce shared groups. */
+export function alignTextRegions<T extends {rect:Rect;text:string;sourceText:string;fontRatio?:number}>(regions:T[], blocks:Rect[]):T[] {
+  // When both detectors agree on the block count, reading order is more reliable
+  // than approximate vision coordinates on low-resolution, dense screenshots.
+  if(regions.length===blocks.length && blocks.length>0) {
+    const orderedRegions=[...regions].sort((a,b)=>a.rect.y-b.rect.y||a.rect.x-b.rect.x);
+    const orderedBlocks=[...blocks].sort((a,b)=>a.y-b.y||a.x-b.x);
+    return orderedRegions.map((r,i)=>({...r,rect:orderedBlocks[i]}));
+  }
+  const overlap=(a:Rect,b:Rect)=>Math.max(0,Math.min(a.x+a.width,b.x+b.width)-Math.max(a.x,b.x))*Math.max(0,Math.min(a.y+a.height,b.y+b.height)-Math.max(a.y,b.y));
+  const grouped: {block:Rect;members:T[];keys:Set<Rect>}[]=[];
+  const union=(a:Rect,b:Rect):Rect=>{const x=Math.min(a.x,b.x),y=Math.min(a.y,b.y);return {x,y,width:Math.max(a.x+a.width,b.x+b.width)-x,height:Math.max(a.y+a.height,b.y+b.height)-y};};
+  for(const region of regions) {
+    const matches=blocks.filter(block=>overlap(region.rect,block)/Math.min(region.rect.width*region.rect.height,block.width*block.height)>.55);
+    const block=matches.length?matches.reduce(union):region.rect;
+    const existing=grouped.filter(g=>matches.some(key=>g.keys.has(key)));
+    if(existing.length){
+      const target=existing[0];target.block=union(target.block,block);target.members.push(region);matches.forEach(key=>target.keys.add(key));
+      for(const other of existing.slice(1)){target.block=union(target.block,other.block);target.members.push(...other.members);other.keys.forEach(key=>target.keys.add(key));grouped.splice(grouped.indexOf(other),1);}
+    }else grouped.push({block,members:[region],keys:new Set(matches)});
+  }
+  return grouped.map(g=>{
+    const members=g.members.sort((a,b)=>Math.abs(a.rect.y-b.rect.y)<.02?a.rect.x-b.rect.x:a.rect.y-b.rect.y);
+    return {...members[0],rect:g.block,text:members.map(r=>r.text).join('\n'),sourceText:members.map(r=>r.sourceText).join('\n'),fontRatio:Math.min(...members.map(r=>r.fontRatio||.045))};
+  }).sort((a,b)=>a.rect.y-b.rect.y);
+}
+
 /** Detect separated text blocks on flat paper; dense image bands are excluded. */
 export function detectFlatTextRegions(pixels: Uint8Array | Uint8ClampedArray, w: number, h: number): Rect[] {
-  const left=Math.ceil(w*.07), right=Math.floor(w*.93), start=Math.ceil(h*.09), end=Math.floor(h*.94);
+  const left=Math.max(0,Math.floor(w*.005)), right=Math.min(w,Math.ceil(w*.995)), start=0, end=h;
   const colors=new Map<number,number>();
   for(let y=Math.ceil(h*.02);y<h*.14;y+=3) for(let x=left;x<right;x+=3) {
     const i=(y*w+x)*4, k=((pixels[i]>>4)<<8)|((pixels[i+1]>>4)<<4)|(pixels[i+2]>>4);
@@ -24,7 +51,7 @@ export function detectFlatTextRegions(pixels: Uint8Array | Uint8ClampedArray, w:
   for(const band of bands) {
     const top=band[0].y,bottom=band[band.length-1].y;
     // A chart is a continuous tall ink band; glyph lines have blank rows between them.
-    if(bottom-top>h*.055 || band.filter(r=>r.count/(right-left)>.65).length>h*.025){barrier=true;continue;}
+    if(bottom-top>h*.085 || band.filter(r=>r.count/(right-left)>.65).length>h*.045){barrier=true;continue;}
     const l=Math.min(...band.map(r=>r.l)),r=Math.max(...band.map(r=>r.r));
     if(r-l<w*.13 || bottom-top<2) continue;
     const prev=groups[groups.length-1];
@@ -33,7 +60,7 @@ export function detectFlatTextRegions(pixels: Uint8Array | Uint8ClampedArray, w:
     barrier=false;
   }
   const pad=Math.max(2,Math.round(w*.008));
-  return groups.map(g=>({x:(g.left-pad)/w,y:(g.top-pad)/h,width:(g.right-g.left+1+2*pad)/w,height:(g.bottom-g.top+1+2*pad)/h}));
+  return groups.map(g=>{const x=Math.max(0,g.left-pad), y=Math.max(0,g.top-pad), r=Math.min(w,g.right+pad+1), b=Math.min(h,g.bottom+pad+1);return {x:x/w,y:y/h,width:(r-x)/w,height:(b-y)/h};});
 }
 
 /** Locate a sparse text block above a solid chart, keeping a blank separator. */

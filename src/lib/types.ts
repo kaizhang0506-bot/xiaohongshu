@@ -22,7 +22,7 @@ export type StructureId =
   | 'review-log';
 
 /** 输出长度 ID（follow = 跟随参考文案原文长度） */
-export type LengthId = 'short' | 'medium' | 'long' | 'follow';
+export type LengthId = 'concise' | 'short' | 'medium' | 'long' | 'follow';
 
 /** 图文卡片排版模板 ID（清单见 lib/layouts.ts，共 100 套） */
 export type CardLayoutId = string;
@@ -64,6 +64,8 @@ export interface RewriteRequest {
   customLength?: CustomOptionPayload;
   /** 用户附加提示词（自由编写，注入系统提示词，≤500 字） */
   customPrompt?: string;
+  /** 多套仿写的差异化上下文，与用户附加提示词分开传输，≤2000 字 */
+  batchContext?: string;
   /** 深度思考模式（托管模型映射 thinking 参数；DeepSeek 通道透传 thinking 开关） */
   deepThinking?: boolean;
 }
@@ -162,6 +164,7 @@ export interface HistoryItem {
 /** SSE 流式事件 */
 export type StreamEvent =
   | { type: 'delta'; text: string }
+  | { type: 'reset' }
   | { type: 'error'; message: string };
 
 /** 单张卡片的内容数据 */

@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, ty
 import type { ImageItem } from '@/lib/image-utils';
 import { readSseStream } from '@/lib/stream-client';
 import { loadDeepseekKey, loadDeepseekBaseUrl } from '@/lib/storage';
-import { findTextAboveChart, detectFlatTextRegions } from '@/lib/text-region';
+import { findTextAboveChart, detectFlatTextRegions, alignTextRegions } from '@/lib/text-region';
+import { rememberPageTextRegions } from '@/lib/page-visuals';
 
 type Point = { x: number; y: number };
 type Rect = Point & { width: number; height: number };
@@ -27,14 +28,18 @@ function completeTextBounds(image: HTMLImageElement, rect: Rect, isolateAbove = 
   let right = Math.min(w - 1, Math.ceil((rect.x + rect.width) * w));
   let bottom = Math.min(h - 1, Math.ceil((rect.y + rect.height) * h));
   const colors = new Map<number, number>();
+  let lightPixels=0;
   for (let y = top; y <= bottom; y += 2) for (let x = left; x <= right; x += 2) {
     const i = (y * w + x) * 4;
     const key = ((pixels[i] >> 4) << 8) | ((pixels[i + 1] >> 4) << 4) | (pixels[i + 2] >> 4);
     colors.set(key, (colors.get(key) ?? 0) + 1);
+    if(Math.max(pixels[i],pixels[i+1],pixels[i+2])>180 && pixels[i]+pixels[i+1]+pixels[i+2]>350) lightPixels++;
   }
   const [key, count] = [...colors].sort((a, b) => b[1] - a[1])[0];
   const total = [...colors.values()].reduce((a, b) => a + b, 0);
-  if (count / total < 0.55) throw new Error('识别区域底色复杂，请手动框选纯色文字区，避免误擦图表');
+  // JPEG cyan highlights split across many color buckets; accept light paper/highlight
+  // combinations instead of requiring one exact quantized color to dominate.
+  if (count / total < 0.55 && lightPixels/total<.6) throw new Error('识别区域底色复杂，请手动框选纯色文字区，避免误擦图表');
   const bg = [((key >> 8) & 15) * 16 + 8, ((key >> 4) & 15) * 16 + 8, (key & 15) * 16 + 8];
   const ink = (x: number, y: number) => {
     const i = (y * w + x) * 4;
@@ -487,9 +492,12 @@ function ImagePageEditor({
       const padding = Math.max(2, Math.round(width * 0.02));
       let lines: string[] = [];
       let size = target.fontSize;
+      let fittedLineHeight = target.lineHeight;
+      let fitted = false;
+      const lineHeights = [...new Set([target.lineHeight, Math.max(1.1,target.lineHeight*.85),1.05])].sort((a,b)=>b-a);
       const minimumSize = Math.min(
         target.fontSize,
-        Math.max(12, Math.round(canvas.width * 0.022), Math.floor(target.fontSize * 0.7)),
+        Math.max(9, Math.round(canvas.width * 0.012), Math.floor(target.fontSize * 0.55)),
       );
       for (; size >= minimumSize; size -= 1) {
         ctx.font = `${target.bold ? 700 : 400} ${size}px "Microsoft YaHei", "PingFang SC", sans-serif`;
@@ -506,14 +514,17 @@ function ImagePageEditor({
           }
           lines.push(line);
         }
-        if (lines.length * size * target.lineHeight <= height - padding * 2) break;
+        for(const candidate of lineHeights) {
+          if(lines.length * size * candidate <= height-padding*2){fittedLineHeight=candidate;fitted=true;break;}
+        }
+        if(fitted) break;
       }
       if (
         size < minimumSize ||
-        lines.length * size * target.lineHeight > height - padding * 2 ||
+        !fitted || lines.length * size * fittedLineHeight > height - padding * 2 ||
         Array.from(target.text).some((char: string) => ctx.measureText(char).width > width - padding * 2)
       ) {
-        throw new Error('本页文字仍超出安全文字区，原文已保留。可点「AI 适配本段」生成更短版本，或增加图片重新分段；不会覆盖图表或强行缩成小字。');
+        throw new Error('替换文字仍放不下，原图已保留。请减少该区域文字或调整字号后重试。');
       }
       let fill = background;
       if (autoBackground) {
@@ -545,12 +556,13 @@ function ImagePageEditor({
       ctx.fillStyle = target.foreground;
       ctx.textBaseline = 'top';
       lines.forEach((line: string, row: number) => {
-        ctx.fillText(line, x + padding, y + padding + row * size * target.lineHeight);
+        ctx.fillText(line, x + padding, y + padding + row * size * fittedLineHeight);
       });
       ctx.restore();
       }
       // 预览/下载用：完整合成图（保留原图背景，贴合原图观感）
       const url = canvas.toDataURL('image/png');
+      rememberPageTextRegions(image.fullDataUrl,targets.flatMap(t=>t.rect?[t.rect]:[]));
       // 卡片套模板用：抠掉纯色背景，只留文字与图表，让模板背景透出
       const cardUrl = removeFlatBackground(canvas);
       setOutput(url);
@@ -598,13 +610,12 @@ function ImagePageEditor({
       const data = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1)) as { safe?: boolean; reason?: string; regions?: Region[] };
       if (!data.safe) throw new Error(data.reason || '未识别到可安全替换的文字区，请手动框选');
       if (!data.regions?.length || data.regions.length > 16) throw new Error('识别结果不完整，请重试');
-      if (localRegions.length && data.regions.length !== localRegions.length) throw new Error('部分文字区尚未识别完整，请重新识别');
-      const replacements: TextReplacement[] = data.regions.map((region, regionIndex) => {
+      const replacements: TextReplacement[] = alignTextRegions(data.regions,localRegions).map((region) => {
         const r = region.rect;
         if (!r || ![r.x,r.y,r.width,r.height].every(Number.isFinite) || r.x < 0 || r.y < 0 || r.width < .01 || r.height < .01 || r.x+r.width>1 || r.y+r.height>1 || typeof region.text !== 'string' || !region.text.trim() || region.text.length>1200) throw new Error('识别结果不完整，请重试');
         const count = (value: string) => Array.from(value.replace(/\s/gu, '')).length;
-        if (typeof region.sourceText !== 'string' || count(region.sourceText) !== count(region.text)) throw new Error('新旧文字字数未对齐，原图已保留，请重试');
-        return { rect: localRegions[regionIndex] ?? completeTextBounds(imageRef.current!, r, true), text: region.text,
+        if (typeof region.sourceText !== 'string' || !count(region.sourceText) || count(region.text) > Math.ceil(count(region.sourceText)*1.1)+3) throw new Error('替换文字比原区更长，请先精简后重试');
+        return { rect: completeTextBounds(imageRef.current!, r, false), text: region.text,
           fontSize: Math.round(imageRef.current!.naturalWidth * Math.max(.015, Math.min(.12, Number(region.fontRatio)||.045))),
           bold: region.bold === true, foreground: /^#[0-9a-f]{6}$/i.test(region.foreground ?? '') ? region.foreground! : '#352a12', lineHeight: Math.max(1.1,Math.min(1.8,Number(region.lineHeight)||1.5)) };
       });
@@ -616,7 +627,7 @@ function ImagePageEditor({
       const first = replacements[0];
       setRect(first.rect); setText(first.text); setFontSize(first.fontSize); setBold(first.bold); setForeground(first.foreground); setLineHeight(first.lineHeight);
       const url = generate(replacements);
-      setProgress(url ? '整页 ' + replacements.length + ' 个文字区已全部换字，新旧字数一致。可选择各区域继续调整。' : '文字合成未完成，原图已保留。');
+      setProgress(url ? '本页已识别 ' + replacements.length + ' 个文字区并完成换字，请逐区核对。' : '文字合成未完成，原图已保留。');
       return url;
     } catch (cause: unknown) {
       if (id === requestId.current) {

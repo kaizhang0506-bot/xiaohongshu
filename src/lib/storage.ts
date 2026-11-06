@@ -4,6 +4,7 @@ import {
   type CustomOption,
   type CustomOptionStores,
   type HistoryItem,
+  type RewriteResult,
 } from './types';
 import {
   DEFAULT_IMAGE_MODEL_ID,
@@ -25,7 +26,7 @@ const DEEPSEEK_VISION_STORAGE_KEY = 'xhs-rewrite-deepseek-vision';
 const CUSTOM_PROMPT_STORAGE_KEY = 'xhs-rewrite-custom-prompt';
 const CUSTOM_PROMPT_MAX = 500;
 const DEEP_THINKING_STORAGE_KEY = 'xhs-rewrite-deep-thinking';
-const HISTORY_LIMIT = 50;
+const HISTORY_LIMIT = 100;
 const CUSTOM_LIMIT = 20;
 
 export const EMPTY_CUSTOM_OPTIONS: CustomOptionStores = {
@@ -109,6 +110,20 @@ export function deleteHistoryItem(id: string): void {
   if (typeof window === 'undefined') return;
   const list = loadHistory().filter((item) => item.id !== id);
   window.localStorage.setItem(HISTORY_KEY, JSON.stringify(list));
+}
+
+/** Edit the matching saved version in place without creating another history entry. */
+export function updateHistoryResult(previous: RewriteResult, result: RewriteResult): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const list = loadHistory();
+    const index = list.findIndex(item => item.result.body === previous.body &&
+      item.result.titles.length === previous.titles.length &&
+      item.result.titles.every((title, ordinal) => title === previous.titles[ordinal]));
+    if (index < 0) return;
+    list[index] = { ...list[index], result };
+    window.localStorage.setItem(HISTORY_KEY, JSON.stringify(list));
+  } catch { /* Editing remains usable when local history storage is unavailable. */ }
 }
 
 export function loadSettings(): AppSettings {

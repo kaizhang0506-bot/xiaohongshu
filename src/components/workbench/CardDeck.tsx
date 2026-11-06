@@ -1,5 +1,5 @@
 'use client';
-import { loadDeepseekKey, loadDeepseekBaseUrl } from '@/lib/storage';
+import { pageTextRegions, findVisualInTextGaps, findLightPanelVisual } from '@/lib/page-visuals';
 
 import {
   useCallback,
@@ -18,17 +18,8 @@ import {
   X,
 } from 'lucide-react';
 import { CardItem } from './CardItem';
-import { buildCardContents } from '@/lib/card-content';
-import {
-  DEFAULT_IMAGE_MODEL_ID,
-  getImageModel,
-  IMAGE_MODELS,
-} from '@/lib/model';
-import {
-  loadImageModelId,
-  saveImageModelId,
-} from '@/lib/storage';
-import type { CardContent, CardLayoutId, RewriteResult } from '@/lib/types';
+import { buildCardContents, recommendedCardCount } from '@/lib/card-content';
+import type { CardLayoutId, RewriteResult } from '@/lib/types';
 
 const CARD_W = 1080;
 const CARD_H = 1440;
@@ -70,6 +61,26 @@ function extractReferenceVisual(src: string): Promise<string | null> {
         }
         probeCtx.drawImage(image, 0, 0, w, h);
         const { data } = probeCtx.getImageData(0, 0, w, h);
+        const knownText=pageTextRegions(src);
+        if(knownText){
+          const rect=findVisualInTextGaps(data,w,h,knownText);
+          if(!rect){resolve(null);return;}
+          const sx=Math.floor(rect.x*image.width),sy=Math.floor(rect.y*image.height);
+          const sw=Math.min(image.width-sx,Math.ceil(rect.width*image.width)),sh=Math.min(image.height-sy,Math.ceil(rect.height*image.height));
+          const out=document.createElement('canvas');out.width=sw;out.height=sh;
+          out.getContext('2d')!.drawImage(image,sx,sy,sw,sh,0,0,sw,sh);
+          resolve(out.toDataURL('image/png'));return;
+        }
+
+        const lightPanel = findLightPanelVisual(data, w, h);
+        if (lightPanel) {
+          const sx = Math.floor(lightPanel.x * image.width), sy = Math.floor(lightPanel.y * image.height);
+          const sw = Math.min(image.width - sx, Math.ceil(lightPanel.width * image.width));
+          const sh = Math.min(image.height - sy, Math.ceil(lightPanel.height * image.height));
+          const out = document.createElement('canvas'); out.width = sw; out.height = sh;
+          out.getContext('2d')!.drawImage(image, sx, sy, sw, sh, 0, 0, sw, sh);
+          resolve(out.toDataURL('image/png')); return;
+        }
 
         // 底色 = 全图众数色（对黑边/状态栏截图更稳，避免四角取平均失真）
         const buckets = new Map<number, number>();
@@ -306,10 +317,12 @@ interface CardDeckProps {
   editedPages?: string[];
   layout: CardLayoutId;
   brandName: string;
-  /** 工作台上传的参考图（dataURL），用于 AI 配图锁定主体 / 直接作为封面 */
+  /** 工作台上传的参考图（dataURL），提取原图表/照片，也可直接作为封面 */
   referenceImages?: string[];
   /** 与 referenceImages 一一对应的高清副本（长边≤2560）：提取素材与封面展示用 */
   referenceFullImages?: string[];
+  /** auto 用于整屏参考截图；full 直接保留上传图片，跳过素材提取。 */
+  referenceMode?: 'auto' | 'full';
   /** 多套模板批量打包时用于标识这一套 */
   deckKey?: string;
   /** 把导出句柄交给父级（批量 ZIP 下载用） */
@@ -321,11 +334,11 @@ interface CardDeckProps {
 /** 单套模板的导出句柄：逐页 PNG + 整组长图 */
 export interface CardDeckExportHandle {
   exportPages: () => Promise<Array<{ fileName: string; blob: Blob }>>;
-  exportStitched: () => Promise<Blob>;
+  exportStitched: (pages?: Array<{ fileName: string; blob: Blob }>) => Promise<Blob>;
 }
 
 /** 按容器宽度等比缩放渲染 1080x1440 卡片 */
-function ScaledCard({ children }: { children: ReactNode }) {
+export function ScaledCard({ children }: { children: ReactNode }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(0.2);
 
@@ -388,38 +401,28 @@ export function CardDeck({
   brandName,
   referenceImages = EMPTY_REFERENCE_IMAGES,
   referenceFullImages = EMPTY_REFERENCE_IMAGES,
+  referenceMode = 'auto',
   deckKey,
   registerDeck,
   editedPages,
   fontScale = 1,
 }: CardDeckProps) {
-  const [count, setCount] = useState(6);
+  const [count, setCount] = useState<number | 'auto'>('auto');
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   const [busyIndex, setBusyIndex] = useState<number | null>(null);
   const [groupBusy, setGroupBusy] = useState(false);
-  /** 每张卡片的配图（卡片序号 → dataURL），整组生成 */
+  const [exportError, setExportError] = useState<string | null>(null);
+  /** 用户直接选用的上传素材（卡片序号 → dataURL），供封面使用 */
   const [cardImages, setCardImages] = useState<Record<number, string>>({});
-  const [illustrating, setIllustrating] = useState(false);
-  const [illustrateProgress, setIllustrateProgress] = useState({
-    done: 0,
-    total: 0,
-  });
-  const [illustrateError, setIllustrateError] = useState<string | null>(null);
-  const [imageModelId, setImageModelId] = useState(DEFAULT_IMAGE_MODEL_ID);
+  const [coverImageEnabled, setCoverImageEnabled] = useState(true);
   /** 参考截图中提取出的视觉素材，作为封面/内容页底图复用 */
   const [referenceVisual, setReferenceVisual] = useState<string | null>(null);
   const [pageVisuals, setPageVisuals] = useState<Array<string | null>>([]);
+  /** 导出等待本轮所有原图处理完成；换图时替换为新一轮 Promise。 */
+  const visualPreparation = useRef<Promise<void>>(Promise.resolve());
   const [referenceVisualBusy, setReferenceVisualBusy] = useState(false);
   /** 原图取用方式：crop = 自动裁出的图表区域（默认）；full = 整张截图 */
   const [visualMode, setVisualMode] = useState<'crop' | 'full'>('crop');
-
-  /** 当前选中的配图模型 */
-  const imageModel = getImageModel(imageModelId);
-  const imageCount = Object.keys(cardImages).length;
-
-  useEffect(() => {
-    setImageModelId(loadImageModelId());
-  }, []);
 
   /** 素材提取源：优先高清副本，无则回退压缩版 */
   const visualSource = referenceFullImages[0] || referenceImages[0];
@@ -428,30 +431,43 @@ export function CardDeck({
     let cancelled = false;
     const sources = referenceImages.map((src, index) => referenceFullImages[index] || src);
     setPageVisuals([]);
-    void Promise.all(sources.map(async src => {
-      try { return await extractReferenceVisual(src); } catch { return src; }
-    })).then(visuals => { if (!cancelled) setPageVisuals(visuals); });
+    const preparedVisuals = referenceMode === 'full'
+      ? Promise.resolve(sources)
+      : Promise.all(sources.map(async src => {
+        try { return await extractReferenceVisual(src); } catch { return src; }
+      }));
+    visualPreparation.current = preparedVisuals.then(visuals => { if (!cancelled) setPageVisuals(visuals); });
     return () => { cancelled = true; };
-  }, [referenceImages, referenceFullImages]);
+  }, [referenceImages, referenceFullImages, referenceMode]);
 
+  const autoCoverVisual = referenceMode === 'full' || visualMode === 'full'
+    ? referenceFullImages[0] || referenceImages[0]
+    : pageVisuals.find((src): src is string => !!src);
+  const coverVisual = coverImageEnabled ? cardImages[0] || autoCoverVisual : undefined;
   const visualForPage = (index: number) => {
-    if (index === 0) return undefined;
+    if (index === 0) return coverVisual;
     const sourceIndex = index - 1;
     if (sourceIndex >= referenceImages.length) return undefined;
-    if (visualMode === 'full') return referenceFullImages[sourceIndex] || referenceImages[sourceIndex];
+    if (referenceMode === 'full' || visualMode === 'full') return referenceFullImages[sourceIndex] || referenceImages[sourceIndex];
     // 未识别完时不抢先嵌入整页，文字页也不回退成图片。
     return pageVisuals[sourceIndex] ?? undefined;
   };
 
   /** 卡片实际使用的原图：默认自动裁出的图表区域，可一键切换为整张截图 */
   const effectiveReference =
-    visualMode === 'full' ? (visualSource ?? null) : referenceVisual;
+    referenceMode === 'full' || visualMode === 'full' ? (visualSource ?? null) : referenceVisual;
 
   /** 有参考截图时自动保留下方图表/照片（无需手动点击）；换图自动重裁 */
   useEffect(() => {
-    setVisualMode('crop');
+    setVisualMode(referenceMode === 'full' ? 'full' : 'crop');
+    if (referenceMode === 'full') {
+      setReferenceVisual(visualSource ?? null);
+      setReferenceVisualBusy(false);
+      return;
+    }
     if (!visualSource) {
       setReferenceVisual(null);
+      setReferenceVisualBusy(false);
       return;
     }
     let cancelled = false;
@@ -469,136 +485,101 @@ export function CardDeck({
     return () => {
       cancelled = true;
     };
-  }, [visualSource]);
+  }, [visualSource, referenceMode]);
 
   const contents = useMemo(
     () => {
-      const pages = buildCardContents(result, Math.max(count, referenceImages.length + 2), brandName);
-      while (pages.length - 2 < referenceImages.length) {
+      // 有参考图时保留既有的逐图映射约束；纯文字默认按内容量自动分页。
+      const requestedCount = count === 'auto'
+        ? referenceImages.length > 0 ? 6 : recommendedCardCount(result.body)
+        : count;
+      const pages = buildCardContents(result, Math.max(requestedCount, referenceImages.length + 1), brandName, {
+        minimumSections: referenceImages.length,
+      });
+      while (pages.length - 1 < referenceImages.length) {
         pages.splice(pages.length - 1, 0, {
           kind: 'section', index: 0, total: 0,
           heading: '原图素材', paragraph: '',
         });
       }
-      return pages.map((page, index) => ({ ...page, index, total: pages.length }));
+      return pages.map((page, index) => ({
+        ...page, index, total: pages.length,
+        ...(page.kind === 'section' ? { sectionNo: index } : {}),
+      }));
     },
     [result, count, brandName, referenceImages.length],
   );
 
-  /** 文案或卡片数量变化后，旧配图与新内容错位，直接清空 */
+  /** 文案或卡片数量变化后清空手动选择的封面，避免素材错位 */
   useEffect(() => {
     setCardImages({});
-    setIllustrateError(null);
-  }, [result, count]);
-
-  /** 为单张卡片生成配图（按页面角色定制构图），成功后就地生效 */
-  const illustrateOne = useCallback(
-    async (index: number, content: (typeof contents)[number]) => {
-      const title = result.titles[0]?.trim() ?? '';
-      const summary = [result.body.slice(0, 80), ...result.tags.slice(0, 5)]
-        .filter(Boolean)
-        .join('，');
-      const res = await fetch('/api/illustrate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title,
-          summary,
-          body: result.body,
-          tags: result.tags,
-          layout,
-          modelId: imageModelId,
-          relayKey: loadDeepseekKey(),
-          relayBaseUrl: loadDeepseekBaseUrl(),
-          refImages: referenceImages,
-          pageRole:
-            content.kind === 'cover'
-              ? 'cover'
-              : content.kind === 'end'
-                ? 'end'
-                : 'content',
-          pageTitle:
-            content.kind === 'section' ? content.heading : content.title,
-          pageText:
-            content.kind === 'section'
-              ? content.paragraph
-              : content.kind === 'end'
-                ? (content.tags ?? []).join('、')
-                : result.body.slice(0, 200),
-        }),
-      });
-      const data = (await res.json()) as { image?: string; error?: string };
-      if (!res.ok || !data.image) {
-        throw new Error(data.error ?? '配图生成失败');
-      }
-      setCardImages((prev) => ({ ...prev, [index]: data.image as string }));
-    },
-    [result, layout, imageModelId, referenceImages],
-  );
-
-  /** 整组配图：封面 + 全部内容页 + 结尾页，3 路并发生成，逐张生效 */
-  const handleIllustrate = useCallback(async () => {
-    const title = result.titles[0]?.trim();
-    if (!title || illustrating) return;
-    setIllustrating(true);
-    setIllustrateError(null);
-    setCardImages({});
-    const queue = contents.map((content, index) => ({ content, index }));
-    setIllustrateProgress({ done: 0, total: queue.length });
-    let cursor = 0;
-    let failed = 0;
-    const worker = async () => {
-      while (cursor < queue.length) {
-        const item = queue[cursor];
-        cursor += 1;
-        try {
-          await illustrateOne(item.index, item.content);
-        } catch {
-          failed += 1;
-        } finally {
-          setIllustrateProgress((prev) => ({ ...prev, done: prev.done + 1 }));
-        }
-      }
-    };
-    try {
-      await Promise.all(
-        Array.from({ length: Math.min(3, queue.length) }, () => worker()),
-      );
-      if (failed === queue.length) {
-        setIllustrateError('配图生成失败，请稍后重试');
-      } else if (failed > 0) {
-        setIllustrateError(`${failed} 张配图失败，再点一次可重新生成整组`);
-      }
-    } finally {
-      setIllustrating(false);
-    }
-  }, [result, contents, illustrating, illustrateOne]);
+    setCoverImageEnabled(true);
+  }, [result.body, count, referenceImages]);
 
   const hiddenRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   const captureCard = useCallback(async (index: number) => {
     const { default: html2canvas } = await import('html2canvas');
-    const el = hiddenRefs.current[index];
-    if (!el) throw new Error(`卡片 ${index + 1} 尚未渲染`);
     await document.fonts.ready;
-    await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-    if (el.querySelector('[data-text-fit="overflow"]')) throw new Error(`第 ${index + 1} 张文字超出模板空间，请增加卡片页数后再导出`);
-    return html2canvas(el, {
-      backgroundColor: null,
-      logging: false,
-      useCORS: true,
-      scale: 1,
-      width: CARD_W,
-      height: CARD_H,
+    // Background tabs throttle animation frames. Still allow React to commit without
+    // making every exported card wait for the browser to foreground the tab.
+    const nextPaint = () => new Promise<void>(resolve => {
+      let frame = 0;
+      const finish = () => { clearTimeout(timer); cancelAnimationFrame(frame); resolve(); };
+      const timer = window.setTimeout(finish, 100);
+      frame = requestAnimationFrame(() => { frame = requestAnimationFrame(finish); });
     });
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const preparation = visualPreparation.current;
+      await preparation;
+      // setPageVisuals 完成后还要等 React 提交新 DOM，不能截取原图未就绪的旧节点。
+      await nextPaint();
+      if (visualPreparation.current !== preparation) continue;
+      const el = hiddenRefs.current[index];
+      if (!el) throw new Error(`卡片 ${index + 1} 尚未渲染`);
+      const images = Array.from(el.querySelectorAll('img'));
+      const sources = images.map(image => image.src);
+      try {
+        await Promise.all(images.map(async image => {
+          await image.decode();
+          if (!image.naturalWidth) throw new Error('图片为空');
+        }));
+      } catch {
+        if (visualPreparation.current !== preparation) continue;
+        throw new Error(`第 ${index + 1} 张的原图加载失败，请检查图片后重试导出`);
+      }
+      await nextPaint();
+      if (visualPreparation.current !== preparation || hiddenRefs.current[index] !== el) continue;
+      const currentImages = Array.from(el.querySelectorAll('img'));
+      if (currentImages.length !== images.length || currentImages.some((image, imageIndex) => image !== images[imageIndex] || image.src !== sources[imageIndex])) continue;
+      if (el.querySelector('[data-text-fit="overflow"]')) throw new Error(`第 ${index + 1} 张文字超出模板空间，请增加卡片页数后再导出`);
+      return html2canvas(el, {
+        backgroundColor: null,
+        logging: false,
+        useCORS: true,
+        scale: 1,
+        width: CARD_W,
+        height: CARD_H,
+        // Clone this card and its ancestor/style chain, not every other deck,
+        // upload thumbnail and offscreen export card on the workbench.
+        ignoreElements: node => !(
+          node === el || node.contains(el) || el.contains(node) ||
+          document.head.contains(node) || node.tagName === 'STYLE' || node.tagName === 'LINK'
+        ),
+      });
+    }
+    throw new Error('原图仍在变化，请等待素材处理完成后重试导出');
   }, []);
 
   const handleDownloadCard = useCallback(
     async (index: number) => {
       setBusyIndex(index);
+      setExportError(null);
       try {
         const canvas = await captureCard(index);
         downloadCanvas(canvas, `xhs-card-${String(index + 1).padStart(2, '0')}.png`);
+      } catch (error) {
+        setExportError(error instanceof Error ? error.message : '图片导出失败，请重试');
       } finally {
         setBusyIndex(null);
       }
@@ -606,12 +587,11 @@ export function CardDeck({
     [captureCard],
   );
 
-  const buildStitched = useCallback(async (): Promise<HTMLCanvasElement> => {
-    const canvases = await Promise.all(contents.map((_, i) => captureCard(i)));
+  const buildStitched = useCallback(async (pages?: Array<{ fileName: string; blob: Blob }>): Promise<HTMLCanvasElement> => {
     const gap = 48;
     const width = CARD_W;
-    const height =
-      canvases.reduce((sum, c) => sum + c.height, 0) + gap * (canvases.length - 1);
+    const pageCount = pages?.length ?? contents.length;
+    const height = CARD_H * pageCount + gap * (pageCount - 1);
     const stitch = document.createElement('canvas');
     stitch.width = width;
     stitch.height = height;
@@ -620,18 +600,36 @@ export function CardDeck({
     ctx.fillStyle = '#FAF7F1';
     ctx.fillRect(0, 0, width, height);
     let y = 0;
-    for (const c of canvases) {
-      ctx.drawImage(c, 0, y);
-      y += c.height + gap;
+    for (let index = 0; index < pageCount; index += 1) {
+      if (pages) {
+        // ZIP already captured each page. Reuse those exact PNGs for the long
+        // image instead of rasterizing the whole deck a second time.
+        const url = URL.createObjectURL(pages[index].blob);
+        try {
+          const image = new Image();
+          image.src = url;
+          await image.decode();
+          ctx.drawImage(image, 0, y);
+        } finally { URL.revokeObjectURL(url); }
+      } else {
+        const canvas = await captureCard(index);
+        ctx.drawImage(canvas, 0, y);
+        canvas.width = 0;
+        canvas.height = 0;
+      }
+      y += CARD_H + gap;
     }
     return stitch;
   }, [captureCard, contents]);
 
   const handleDownloadGroup = useCallback(async () => {
     setGroupBusy(true);
+    setExportError(null);
     try {
       const stitch = await buildStitched();
       downloadCanvas(stitch, `xhs-cards-${contents.length}p.png`);
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : '长图导出失败，请重试');
     } finally {
       setGroupBusy(false);
     }
@@ -650,10 +648,12 @@ export function CardDeck({
             fileName: `${String(i + 1).padStart(2, '0')}_${pages.length === 0 ? '封面' : i === contents.length - 1 ? '结尾页' : '内容页'}.png`,
             blob: await canvasToBlob(canvas),
           });
+          canvas.width = 0;
+          canvas.height = 0;
         }
         return pages;
       },
-      exportStitched: async () => canvasToBlob(await buildStitched()),
+      exportStitched: async pages => canvasToBlob(await buildStitched(pages)),
     };
     registerDeck(key, handle);
     return () => registerDeck(key, null);
@@ -678,10 +678,11 @@ export function CardDeck({
           组图张数
           <select
             value={count}
-            onChange={(event) => setCount(Number(event.target.value))}
+            onChange={(event) => setCount(event.target.value === 'auto' ? 'auto' : Number(event.target.value))}
             aria-label="选择生成的组图张数"
             className="rounded-full border border-[rgba(26,24,20,0.14)] bg-white px-2.5 py-1 text-[12px] font-bold text-[#1A1814] outline-none focus:border-[#FF2E4D]"
           >
+            <option value="auto">自动（{contents.length} 张）</option>
             {Array.from(
               { length: MAX_CARD_COUNT - MIN_CARD_COUNT + 1 },
               (_, index) => MIN_CARD_COUNT + index,
@@ -695,62 +696,28 @@ export function CardDeck({
         )}
       </div>
 
-      {/* AI 配图工具栏（二合一模式隐藏） */}
+      {/* 本地模板排版与上传素材控制 */}
       {(!editedPages || editedPages.length === 0) && (
       <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-[rgba(26,24,20,0.08)] bg-[#FAF7F1] px-3 py-2.5">
-        <button
-          type="button"
-          onClick={() => void handleIllustrate()}
-          disabled={illustrating || !!effectiveReference}
-          title={effectiveReference ? '已启用截图原图，卡片直接复用原图；如需 AI 配图请先点「已自动保留原图」移除' : 'AI 生成整组配图'}
-          className="inline-flex items-center gap-1.5 rounded-full bg-[#1A1814] px-3.5 py-1.5 text-[12px] font-bold text-white transition-all duration-150 hover:bg-[#33302A] disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {illustrating ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-          ) : (
-            <ImagePlus className="h-3.5 w-3.5" aria-hidden />
-          )}
-          {illustrating
-            ? `正在配图 ${illustrateProgress.done}/${illustrateProgress.total}…`
-            : 'AI 生成整组配图'}
-        </button>
-        {imageCount > 0 && !illustrating && (
+        <span className="text-[12px] font-bold text-[#1A1814]">本地模板排版 · 无需生图模型</span>
+        <span className="text-[11px] text-[#6B655C]">封面：大标题＋完整大图，正文从第二页开始</span>
+        <span className="text-[11px] text-[#9A948B]">字体、背景和装饰由网站直接排版，上传的图表/照片保留原图</span>
+        {coverVisual && (
           <button
             type="button"
-            onClick={() => setCardImages({})}
+            onClick={() => { setCardImages({}); setCoverImageEnabled(false); }}
             className="inline-flex items-center gap-1 rounded-full border border-[rgba(26,24,20,0.14)] bg-white px-3 py-1.5 text-[12px] font-medium text-[#6B655C] transition-colors duration-150 hover:border-[#FF2E4D]/50 hover:text-[#E01335]"
           >
             <X className="h-3.5 w-3.5" aria-hidden />
-            移除全部配图
+            移除封面图片
           </button>
         )}
-        <select
-          aria-label="配图模型"
-          value={imageModelId}
-          onChange={(e) => {
-            setImageModelId(e.target.value);
-            saveImageModelId(e.target.value);
-          }}
-          disabled={illustrating}
-          title={`配图模型：${imageModel.label}（${imageModel.id}）`}
-          className="h-8 rounded-full border border-[rgba(26,24,20,0.14)] bg-white px-2.5 text-[12px] font-medium text-[#1A1814] outline-none transition-colors duration-150 focus:border-[#FF2E4D] disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {IMAGE_MODELS.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.note ? `${m.label} · ${m.note}` : m.label}
-            </option>
-          ))}
-        </select>
-        <span className="text-[11px] text-[#9A948B]">
-          {effectiveReference
-            ? '当前为「原图模式」：卡片直接复用截图里的图表/照片，只替换文字，不做任何 AI 重绘'
-            : illustrating
-              ? `逐页读取内容构图，由 ${imageModel.label} 生成实拍照片，逐张生效`
-              : imageCount > 0
-                ? `已配图 ${imageCount}/${contents.length} 张（封面+内容页+结尾页）· 再点一次重新生成 · ${imageModel.label}`
-                : `每张卡片按各自内容单独构图，画面无文字 · ${imageModel.label}（${imageModel.id}）`}
-        </span>
+        {!coverVisual && autoCoverVisual && (
+          <button type="button" onClick={() => setCoverImageEnabled(true)} className="rounded-full border border-[rgba(26,24,20,0.14)] bg-white px-3 py-1.5 text-[12px] font-medium text-[#6B655C]">封面使用图片</button>
+        )}
         {effectiveReference && (
+          // 本地 dataURL 素材直接展示，避免图片优化改变导出素材来源。
+          // eslint-disable-next-line @next/next/no-img-element
           <img
             src={effectiveReference}
             alt="卡片将使用的原图素材"
@@ -758,7 +725,10 @@ export function CardDeck({
             className="h-9 w-9 rounded-md border border-[rgba(26,24,20,0.12)] bg-white object-contain"
           />
         )}
-        {referenceVisual && visualSource && (
+        {referenceMode === 'full' && referenceImages.length > 0 && (
+          <span className="rounded-full border border-[#B8D5B0] bg-[#F2F8EE] px-3 py-1.5 text-[12px] font-bold text-[#345238]">原图完整保留 · 不裁切、不提取</span>
+        )}
+        {referenceMode === 'auto' && referenceVisual && visualSource && (
           <button
             type="button"
             onClick={() => setVisualMode(visualMode === 'full' ? 'crop' : 'full')}
@@ -767,7 +737,7 @@ export function CardDeck({
             {visualMode === 'full' ? '改用图表区域' : '改用整张截图'}
           </button>
         )}
-        {referenceImages.length > 0 && (
+        {referenceMode === 'auto' && referenceImages.length > 0 && (
           <button
             type="button"
             disabled={referenceVisualBusy}
@@ -788,29 +758,24 @@ export function CardDeck({
             {referenceVisual ? '已自动保留原图表（点击移除）' : referenceVisualBusy ? '正在提取图表…' : '保留截图里的图表/图片'}
           </button>
         )}
-        {illustrateError && (
-          <span className="text-[11px] font-medium text-[#E01335]">
-            {illustrateError}
-          </span>
-        )}
       </div>
       )}
 
       {(!editedPages || editedPages.length === 0) && referenceImages.length > 0 && (
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <span className="text-[11px] font-medium text-[#6B655C]">
-            参考图直接作封面（点击应用）：
+            首张默认带图，可点击更换封面图片：
           </span>
           {referenceImages.map((src, index) => (
             <button
               key={index}
               type="button"
               onClick={() => {
+                setCoverImageEnabled(true);
                 setCardImages((prev) => ({
                   ...prev,
                   0: referenceFullImages[index] ?? src,
                 }));
-                setIllustrateError(null);
               }}
               title={`使用参考图 ${index + 1} 作为封面`}
               aria-label={`使用参考图 ${index + 1} 作为封面`}
@@ -825,7 +790,7 @@ export function CardDeck({
             </button>
           ))}
           <span className="text-[11px] text-[#9A948B]">
-            AI 生成封面照片时也会参考这些图锁定主体
+            默认使用提取出的完整图表或照片；纯文字页不会作为封面小图嵌入
           </span>
         </div>
       )}
@@ -841,6 +806,7 @@ export function CardDeck({
             >
               <ScaledCard>
                 <CardItem
+                  key={content.kind}
                   content={content}
                   editedPage={editedPages?.[content.index]}
                   layout={layout}
@@ -875,6 +841,7 @@ export function CardDeck({
         ))}
       </div>
 
+      {exportError && <p role="alert" className="mt-4 rounded-xl bg-[#FFF0F2] px-3 py-2 text-sm text-[#E01335]">{exportError}</p>}
       <button
         type="button"
         onClick={() => void handleDownloadGroup()}
@@ -908,6 +875,7 @@ export function CardDeck({
             }}
           >
             <CardItem
+              key={content.kind}
               content={content}
                   editedPage={editedPages?.[content.index]}
               layout={layout}
@@ -942,6 +910,7 @@ export function CardDeck({
               >
                 <ScaledCard>
                   <CardItem
+                    key={contents[previewIndex].kind}
                     content={contents[previewIndex]}
                     editedPage={editedPages?.[previewIndex]}
                     layout={layout}

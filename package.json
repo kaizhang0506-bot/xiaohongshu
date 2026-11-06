@@ -3,6 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "handoff:check": "node scripts/check-deployment.mjs source",
+    "handoff:package": "node scripts/package-release.cjs",
     "build": "bash ./scripts/build.sh",
     "dev": "bash ./scripts/dev.sh",
     "preinstall": "npx only-allow pnpm",
